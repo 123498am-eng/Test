@@ -10,6 +10,8 @@ import com.anthropic.models.beta.messages.BetaContentBlockParam
 import com.anthropic.models.beta.messages.BetaJsonOutputFormat
 import com.anthropic.models.beta.messages.BetaOutputConfig
 import com.anthropic.models.beta.messages.BetaStopReason
+import com.anthropic.core.http.StreamResponse
+import com.anthropic.models.beta.messages.BetaRawMessageStreamEvent
 import com.anthropic.models.beta.messages.MessageCreateParams
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -66,8 +68,12 @@ object ProductAI {
 - features: 눈에 보이는 특징이나 알아 두면 좋은 점 3가지 이내
 확실하지 않은 부분은 "추정"이라고 밝히고, 사진에 사람이 있어도 사람에 대해서는 말하지 마세요."""
 
-    fun describe(apiKey: String, image: Bitmap, hint: String?): ProductInfo {
-        val jpeg = ByteArrayOutputStream().also { image.compress(Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
+    /**
+     * 스트리밍으로 받아서, 제품 이름 등이 생성되는 대로 onUpdate 로 바로 알려 줍니다.
+     * 끝나면 완성된 정보를 돌려줍니다.
+     */
+    fun describe(apiKey: String, image: Bitmap, hint: String?, onUpdate: (ProductInfo) -> Unit = {}): ProductInfo {
+        val jpeg = ByteArrayOutputStream().also { image.compress(Bitmap.CompressFormat.JPEG, 80, it) }.toByteArray()
         val b64 = Base64.encodeToString(jpeg, Base64.NO_WRAP)
         val prompt = if (hint != null) "기기의 사물 인식 결과는 '$hint' 입니다. 이 제품을 설명해 주세요." else "이 사진 속 제품을 설명해 주세요."
 
@@ -88,18 +94,42 @@ object ProductAI {
             ))
             .build()
 
-        val msg = client(apiKey).beta().messages().create(params)
-        if (msg.stopReason().orElse(null) == BetaStopReason.REFUSAL) {
-            throw IllegalStateException("이 사진은 분석할 수 없습니다")
+        val sb = StringBuilder()
+        var refused = false
+        var lastLen = 0
+        client(apiKey).beta().messages().createStreaming(params).use { stream: StreamResponse<BetaRawMessageStreamEvent> ->
+            stream.stream().forEach { event ->
+                event.messageDelta().ifPresent { md ->
+                    if (md.delta().stopReason().orElse(null) == BetaStopReason.REFUSAL) refused = true
+                }
+                event.contentBlockDelta().ifPresent { d ->
+                    d.delta().text().ifPresent { t ->
+                        sb.append(t.text())
+                        if (sb.length - lastLen >= 12) { lastLen = sb.length; partial(sb.toString())?.let(onUpdate) }
+                    }
+                }
+            }
         }
-        val text = msg.content().mapNotNull { it.text().orElse(null)?.text() }.joinToString("")
-        val o = JSONObject(text)
+        if (refused) throw IllegalStateException("이 사진은 분석할 수 없습니다")
+        val o = JSONObject(sb.toString())
         val feats = o.optJSONArray("features")
         return ProductInfo(
             o.optString("name"), o.optString("brand"), o.optString("category"), o.optString("description"),
             (0 until (feats?.length() ?: 0)).map { feats!!.getString(it) },
             "Claude 분석",
         )
+    }
+
+    /** 아직 다 오지 않은 JSON 에서 지금까지 나온 값만 뽑아냅니다. */
+    private fun partial(json: String): ProductInfo? {
+        fun field(name: String): String? {
+            val m = Regex("\"$name\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)").find(json) ?: return null
+            var raw = m.groupValues[1]
+            if (raw.endsWith("\\")) raw = raw.dropLast(1)
+            return runCatching { JSONObject("{\"v\":\"$raw\"}").getString("v") }.getOrDefault(raw)
+        }
+        val name = field("name") ?: return null
+        return ProductInfo(name, field("brand") ?: "", field("category") ?: "", field("description") ?: "", emptyList(), "Claude 분석 중...")
     }
 }
 

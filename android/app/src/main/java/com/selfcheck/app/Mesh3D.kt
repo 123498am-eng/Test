@@ -126,10 +126,8 @@ class MeshData(val pos: FloatArray, val uv: FloatArray, val normal: FloatArray, 
          * points: 얼굴 점 (x, y, z, 사진 기준 0~1). imgW/imgH: 사진 크기.
          * uvRect: 텍스처로 쓰는 사진 영역(픽셀). prevPos 를 주면 프레임 사이 떨림을 줄입니다.
          */
-        fun build(
-            sub: Subdivision, points: FloatArray, imgW: Float, imgH: Float, uvRect: RectF,
-            texture: Bitmap?, prevPos: FloatArray? = null, smooth: Float = 0f,
-        ): MeshData {
+        /** 얼굴 점 468개를 사진 픽셀 좌표(y 위쪽, z 카메라 쪽)로 바꿉니다. */
+        fun imageBase(points: FloatArray, imgW: Float, imgH: Float): FloatArray {
             val n = Subdivision.BASE
             val base = FloatArray(n * 3)
             for (i in 0 until n) {
@@ -137,18 +135,15 @@ class MeshData(val pos: FloatArray, val uv: FloatArray, val normal: FloatArray, 
                 base[i * 3 + 1] = -points[i * 3 + 1] * imgH
                 base[i * 3 + 2] = -points[i * 3 + 2] * imgW
             }
-            val v = sub.vCount
-            val img = FloatArray(v * 3)
-            sub.apply(base, img)
+            return base
+        }
 
-            // 텍스처 좌표: 세분화된 점을 사진 위로 다시 투영
-            val uv = FloatArray(v * 2)
-            for (i in 0 until v) {
-                uv[i * 2] = (img[i * 3] - uvRect.left) / uvRect.width()
-                uv[i * 2 + 1] = (-img[i * 3 + 1] - uvRect.top) / uvRect.height()
-            }
-
-            // 얼굴 기준 좌표계로 정면 보정 (오른쪽 눈꼬리 33, 왼쪽 263, 이마 10, 턱 152)
+        /**
+         * 얼굴 기준 좌표계로 정면 보정 (오른쪽 눈꼬리 33, 왼쪽 263, 이마 10, 턱 152).
+         * 결과는 가운데 정렬, 대략 [-1, 1] 크기. 점 468개만 다루므로 매 프레임 돌려도 가볍습니다.
+         */
+        fun frontal(base: FloatArray): FloatArray {
+            val n = base.size / 3
             fun p(i: Int) = floatArrayOf(base[i * 3], base[i * 3 + 1], base[i * 3 + 2])
             val r = p(33); val l = p(263); val top = p(10); val chin = p(152)
             val ex = norm(sub3(l, r))
@@ -156,21 +151,40 @@ class MeshData(val pos: FloatArray, val uv: FloatArray, val normal: FloatArray, 
             val faceH = len(ey)
             ey = norm(sub3(ey, scale(ex, dot(ey, ex))))
             val ez = cross(ex, ey)
-            val cx = FloatArray(3)
-            for (i in 0 until n) for (k in 0..2) cx[k] += base[i * 3 + k] / n
+            val c = FloatArray(3)
+            for (i in 0 until n) for (k in 0..2) c[k] += base[i * 3 + k] / n
             val s = 2f / (faceH * 1.15f)
-            val pos = FloatArray(v * 3)
+            val out = FloatArray(n * 3)
             var meanZ = 0f
-            for (i in 0 until v) {
-                val d = floatArrayOf(img[i * 3] - cx[0], img[i * 3 + 1] - cx[1], img[i * 3 + 2] - cx[2])
-                pos[i * 3] = dot(d, ex) * s; pos[i * 3 + 1] = dot(d, ey) * s; pos[i * 3 + 2] = dot(d, ez) * s
-                meanZ += pos[i * 3 + 2] / v
+            for (i in 0 until n) {
+                val d = floatArrayOf(base[i * 3] - c[0], base[i * 3 + 1] - c[1], base[i * 3 + 2] - c[2])
+                out[i * 3] = dot(d, ex) * s; out[i * 3 + 1] = dot(d, ey) * s; out[i * 3 + 2] = dot(d, ez) * s
+                meanZ += out[i * 3 + 2] / n
             }
-            for (i in 0 until v) pos[i * 3 + 2] -= meanZ
-            if (prevPos != null && prevPos.size == pos.size && smooth > 0f) {
-                for (i in pos.indices) pos[i] = prevPos[i] * smooth + pos[i] * (1 - smooth)
+            for (i in 0 until n) out[i * 3 + 2] -= meanZ
+            return out
+        }
+
+        /**
+         * frontalBase: 정면 보정된 점 468개 (여러 프레임 평균일 수 있음).
+         * imgBase: 텍스처 좌표를 만들 프레임의 사진 좌표 점. uvRect: 텍스처로 쓰는 사진 영역(픽셀).
+         */
+        fun fromBase(sub: Subdivision, frontalBase: FloatArray, imgBase: FloatArray, uvRect: RectF, texture: Bitmap?): MeshData {
+            val v = sub.vCount
+            val pos = FloatArray(v * 3); sub.apply(frontalBase, pos)
+            val img = FloatArray(v * 3); sub.apply(imgBase, img)
+            val uv = FloatArray(v * 2)
+            for (i in 0 until v) {
+                uv[i * 2] = (img[i * 3] - uvRect.left) / uvRect.width()
+                uv[i * 2 + 1] = (-img[i * 3 + 1] - uvRect.top) / uvRect.height()
             }
             return MeshData(pos, uv, normals(pos, sub.tris), sub.tris, texture)
+        }
+
+        /** 사진 한 장의 얼굴 점으로 바로 메시를 만듭니다. */
+        fun build(sub: Subdivision, points: FloatArray, imgW: Float, imgH: Float, uvRect: RectF, texture: Bitmap?): MeshData {
+            val base = imageBase(points, imgW, imgH)
+            return fromBase(sub, frontal(base), base, uvRect, texture)
         }
 
         fun normals(pos: FloatArray, tris: IntArray): FloatArray {
@@ -219,12 +233,12 @@ class MeshData(val pos: FloatArray, val uv: FloatArray, val normal: FloatArray, 
 }
 
 /** 4배 안티앨리어싱(MSAA)을 우선 시도하고, 안 되면 일반 설정으로 내려갑니다. */
-class MsaaConfigChooser : GLSurfaceView.EGLConfigChooser {
+class MsaaConfigChooser(private val samples: Int = 4) : GLSurfaceView.EGLConfigChooser {
     override fun chooseConfig(egl: EGL10, display: EGLDisplay): EGLConfig {
         val base = intArrayOf(EGL10.EGL_RED_SIZE, 8, EGL10.EGL_GREEN_SIZE, 8, EGL10.EGL_BLUE_SIZE, 8,
             EGL10.EGL_ALPHA_SIZE, 8, EGL10.EGL_DEPTH_SIZE, 16, EGL10.EGL_RENDERABLE_TYPE, 4)
         val tries = listOf(
-            base + intArrayOf(EGL10.EGL_SAMPLE_BUFFERS, 1, EGL10.EGL_SAMPLES, 4, EGL10.EGL_NONE),
+            base + intArrayOf(EGL10.EGL_SAMPLE_BUFFERS, 1, EGL10.EGL_SAMPLES, samples, EGL10.EGL_NONE),
             base + intArrayOf(EGL10.EGL_NONE),
         )
         for (attrs in tries) {

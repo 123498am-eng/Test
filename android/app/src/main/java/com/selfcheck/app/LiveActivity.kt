@@ -8,6 +8,10 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.PixelFormat
+import android.content.Intent
+import android.net.Uri
+import android.view.MotionEvent
 import android.graphics.Rect
 import android.graphics.RectF
 import android.opengl.GLES20
@@ -34,12 +38,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.view.PreviewView
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector
@@ -59,13 +67,20 @@ class FaceModel(val id: Int, val mesh: MeshData, val side: Int /* 1 왼쪽, 2 �
 /** 얼굴 하나의 표시 정보. */
 class FaceInfo(val id: Int, val rect: RectF, val progress: Float, val model: FaceModel?, val dots: FloatArray)
 
-/** 사물 하나의 표시 정보. */
-class ObjInfo(val rect: RectF, val label: String, val score: Float)
+/** 사물 하나의 표시 정보. info 는 실시간 검색(Claude) 결과가 오면 채워집니다. */
+class ObjInfo(val id: Int, val rect: RectF, val label: String, val score: Float, val info: ProductInfo?, val searching: Boolean)
 
-/** 한 프레임: 카메라 사진 + 얼굴/사물 정보. */
-class LiveFrame(val bitmap: Bitmap, val faces: List<FaceInfo>, val objects: List<ObjInfo>) {
-    val w = bitmap.width
-    val h = bitmap.height
+/** 한 프레임의 분석 결과 (분석한 사진의 크기 + 얼굴/사물 정보). 카메라 화면은 미리보기가 따로 그립니다. */
+class LiveFrame(val w: Int, val h: Int, val faces: List<FaceInfo>, val objects: List<ObjInfo>)
+
+/** 프레임 사이에서 같은 물건을 이어 주고, 물건마다 검색 결과를 붙여 둡니다. */
+private class ObjTrack(val id: Int, var rect: RectF, var label: String, var score: Float, now: Long) {
+    var lastSeen = now
+    var frames = 1
+    @Volatile var info: ProductInfo? = null
+    @Volatile var searching = false
+    var asked = false
+    companion object { const val LOST_MS = 1500L }
 }
 
 // ---------- 얼굴 추적 ----------
@@ -75,7 +90,7 @@ private class FaceTrack(val id: Int, var rect: RectF, now: Long) {
     val start = now
     var lastSeen = now
     var frames = 0
-    var sum: FloatArray? = null
+    var sum: FloatArray? = null // 정면 보정한 점 468개의 합
     var model: FaceModel? = null
     var pts = FloatArray(0)
 
@@ -112,7 +127,7 @@ class LiveActivity : ComponentActivity() {
     private lateinit var modeBtn: Button
     private val renderer = LiveRenderer()
     private lateinit var analysisExec: ExecutorService
-    private val aiExec = Executors.newSingleThreadExecutor()
+    private val aiExec = Executors.newFixedThreadPool(3)
 
     @Volatile private var productMode = false
     @Volatile private var resetRequested = false
@@ -126,12 +141,12 @@ class LiveActivity : ComponentActivity() {
 
     // 제품 (분석 스레드 전용)
     private var detector: ObjectDetector? = null
-    private var stableLabel: String? = null
-    private var stableCount = 0
-    private var lastAskedLabel: String? = null
-    private var lastAskTime = 0L
-    @Volatile private var aiBusy = false
+    private val objTracks = mutableListOf<ObjTrack>()
+    private var nextObjId = 1
+    private val inFlight = java.util.concurrent.atomic.AtomicInteger(0)
     @Volatile private var manualAsk = false
+    private var lastStatus = ""
+    private lateinit var previewView: PreviewView
 
     private val askCamera = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) startCamera() else status.text = "카메라 권한이 필요합니다"
@@ -144,14 +159,22 @@ class LiveActivity : ComponentActivity() {
         analysisExec = Executors.newSingleThreadExecutor()
 
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        // 카메라 화면은 미리보기가 원래 속도로 그리고, 3D 모델만 투명한 GL 층에 그립니다
+        previewView = PreviewView(this).apply {
+            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+        root.addView(previewView, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         glView = GLSurfaceView(this).apply {
             setEGLContextClientVersion(2)
-            setEGLConfigChooser(MsaaConfigChooser())
+            setEGLConfigChooser(MsaaConfigChooser(2))
+            holder.setFormat(PixelFormat.TRANSLUCENT)
+            setZOrderOnTop(true)
             setRenderer(renderer)
             renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
         }
         root.addView(glView, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        overlay = OverlayView(this)
+        overlay = OverlayView(this) { info -> openSearch(info) }
         root.addView(overlay, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         val bottom = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(4), dp(8), dp(8)) }
@@ -180,9 +203,9 @@ class LiveActivity : ComponentActivity() {
         bottom.addView(faceBar)
 
         productBar = bar()
-        productBar.btn("지금 분석") { if (Store.apiKey(this).isEmpty()) askKey() else manualAsk = true }
-        productBar.btn(if (Store.autoProduct(this)) "자동 분석: 켬" else "자동 분석: 끔") { b ->
-            val v = !Store.autoProduct(this); Store.setAutoProduct(this, v); b.text = if (v) "자동 분석: 켬" else "자동 분석: 끔"
+        productBar.btn("다시 검색") { if (Store.apiKey(this).isEmpty()) askKey() else manualAsk = true }
+        productBar.btn(if (Store.autoProduct(this)) "실시간 검색: 켬" else "실시간 검색: 끔") { b ->
+            val v = !Store.autoProduct(this); Store.setAutoProduct(this, v); b.text = if (v) "실시간 검색: 켬" else "실시간 검색: 끔"
         }
         productBar.btn("API 키") { askKey() }
         productBar.visibility = View.GONE
@@ -210,8 +233,15 @@ class LiveActivity : ComponentActivity() {
         productBar.visibility = if (on) View.VISIBLE else View.GONE
         overlay.product = null
         if (on && Store.apiKey(this).isEmpty()) {
-            overlay.product = ProductInfo("제품 인식", "", "", "기기 안에서는 80종의 기본 사물만 알아봅니다. 'API 키'에 Claude API 키를 넣으면 거의 모든 제품의 이름과 설명을 볼 수 있습니다.", emptyList(), "안내")
+            overlay.product = ProductInfo("제품 인식", "", "", "기기 안에서는 80종의 기본 사물만 알아봅니다. 'API 키'에 Claude API 키를 넣으면 비추는 물건을 실시간으로 검색해 제품 이름과 설명을 보여 줍니다.", emptyList(), "안내")
         }
+    }
+
+    /** 패널을 누르면 그 제품을 웹에서 검색합니다. */
+    private fun openSearch(info: ProductInfo) {
+        val q = listOf(info.brand, info.name).filter { it.isNotBlank() && it != "-" && it != "알 수 없음" }.joinToString(" ")
+        if (q.isBlank()) return
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(q)))) }
     }
 
     private fun askKey() {
@@ -232,9 +262,14 @@ class LiveActivity : ComponentActivity() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
             val provider = future.get()
+            val ratio = AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
+            val preview = Preview.Builder()
+                .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio).build())
+                .build().also { it.surfaceProvider = previewView.surfaceProvider }
             val analysis = ImageAnalysis.Builder()
                 .setResolutionSelector(ResolutionSelector.Builder()
-                    .setResolutionStrategy(ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
+                    .setAspectRatioStrategy(ratio)
+                    .setResolutionStrategy(ResolutionStrategy(Size(640, 480), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
                     .build())
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
@@ -243,7 +278,7 @@ class LiveActivity : ComponentActivity() {
             val selector = if (front) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
             runCatching {
                 provider.unbindAll()
-                provider.bindToLifecycle(this, selector, analysis)
+                provider.bindToLifecycle(this, selector, preview, analysis)
             }.onFailure { status.text = "카메라를 열 수 없습니다: ${it.message}" }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -261,10 +296,11 @@ class LiveActivity : ComponentActivity() {
 
             if (resetRequested) {
                 resetRequested = false
-                tracks.clear(); stableLabel = null; stableCount = 0; lastAskedLabel = null
+                tracks.clear(); objTracks.clear()
             }
 
             val frame = if (productMode) analyzeProducts(bmp, ts) else analyzeFaces(bmp, ts)
+            bmp.recycle()
             renderer.post(frame)
             overlay.post(frame)
         } catch (e: Exception) {
@@ -277,7 +313,7 @@ class LiveActivity : ComponentActivity() {
     // ----- 얼굴 -----
 
     private fun analyzeFaces(bmp: Bitmap, ts: Long): LiveFrame {
-        val lm = landmarker ?: FaceMesh.create(this, RunningMode.VIDEO, 5, false).also { landmarker = it }
+        val lm = landmarker ?: FaceMesh.createFast(this).also { landmarker = it }
         val faces = lm.detectForVideo(BitmapImageBuilder(bmp).build(), ts).faceLandmarks()
         val w = bmp.width.toFloat(); val h = bmp.height.toFloat()
         val now = ts
@@ -309,13 +345,12 @@ class LiveActivity : ComponentActivity() {
         tracks.removeAll { now - it.lastSeen > FaceTrack.LOST_MS }
 
         // 스캔: 1.5초 동안 얼굴 모양을 평균 내고, 끝나면 텍스처와 함께 고정
-        val sub = Subdivision.get(this)
         for (t in tracks) {
             if (t.model != null || t.lastSeen != now) continue
-            val mesh = MeshData.build(sub, t.pts, w, h, RectF(0f, 0f, w, h), null)
-            val s = t.sum ?: FloatArray(mesh.pos.size).also { t.sum = it }
-            for (k in s.indices) s[k] += mesh.pos[k]
-            if (t.progress(now) >= 1f) t.model = finishModel(t, bmp, sub)
+            val fb = MeshData.frontal(MeshData.imageBase(t.pts, w, h)) // 점 468개만: 가벼움
+            val s = t.sum ?: FloatArray(fb.size).also { t.sum = it }
+            for (k in s.indices) s[k] += fb[k]
+            if (t.progress(now) >= 1f) t.model = finishModel(t, bmp, Subdivision.get(this))
         }
 
         val infos = tracks.filter { now - it.lastSeen < 300 }.map { t ->
@@ -327,14 +362,12 @@ class LiveActivity : ComponentActivity() {
         }
         val scanning = infos.count { it.model == null }
         val done = infos.count { it.model != null }
-        runOnUiThread {
-            status.text = when {
-                infos.isEmpty() -> "얼굴을 카메라에 비춰 주세요"
-                scanning > 0 -> "얼굴 ${infos.size}개 인식 · ${scanning}개 스캔 중 · ${done}개 완료"
-                else -> "얼굴 ${infos.size}개 · 3D 모델 고정됨"
-            }
-        }
-        return LiveFrame(bmp, infos, emptyList())
+        setStatus(when {
+            infos.isEmpty() -> "얼굴을 카메라에 비춰 주세요"
+            scanning > 0 -> "얼굴 ${infos.size}개 인식 · ${scanning}개 스캔 중 · ${done}개 완료"
+            else -> "얼굴 ${infos.size}개 · 3D 모델 고정됨"
+        })
+        return LiveFrame(bmp.width, bmp.height, infos, emptyList())
     }
 
     private fun finishModel(t: FaceTrack, bmp: Bitmap, sub: Subdivision): FaceModel {
@@ -345,63 +378,117 @@ class LiveActivity : ComponentActivity() {
         val crop = Rect((cx - side / 2).toInt(), (cy - side / 2).toInt(), (cx + side / 2).toInt(), (cy + side / 2).toInt())
         val tex = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
         Canvas(tex).apply { drawColor(Color.rgb(40, 34, 32)); drawBitmap(bmp, crop, Rect(0, 0, 512, 512), Paint(Paint.FILTER_BITMAP_FLAG)) }
-        val last = MeshData.build(sub, t.pts, w, h, RectF(crop), tex)
         val avg = t.sum!!.copyOf().also { a -> for (k in a.indices) a[k] /= t.frames.coerceAtLeast(1) }
-        val mesh = MeshData(avg, last.uv, MeshData.normals(avg, sub.tris), sub.tris, tex)
+        val mesh = MeshData.fromBase(sub, avg, MeshData.imageBase(t.pts, w, h), RectF(crop), tex)
         val sideChoice = if (w - t.rect.right >= t.rect.left) 2 else 1 // 공간이 넓은 쪽에 고정
         return FaceModel(t.id, mesh, sideChoice)
     }
 
     // ----- 제품 -----
 
+    private fun setStatus(t: String) {
+        if (t == lastStatus) return
+        lastStatus = t
+        runOnUiThread { status.text = t }
+    }
+
     private fun analyzeProducts(bmp: Bitmap, ts: Long): LiveFrame {
-        val det = detector ?: ObjectDetector.createFromOptions(this, ObjectDetector.ObjectDetectorOptions.builder()
-            .setBaseOptions(BaseOptions.builder().setModelAssetPath("efficientdet_lite0.tflite").build())
+        val det = detector ?: createDetector().also { detector = it }
+        val res = det.detectForVideo(BitmapImageBuilder(bmp).build(), ts)
+        val dets = res.detections().mapNotNull { d ->
+            val c = d.categories().firstOrNull() ?: return@mapNotNull null
+            if (c.categoryName() == "person") return@mapNotNull null // 사람은 제품이 아니므로 제외
+            Triple(RectF(d.boundingBox()), c.categoryName(), c.score())
+        }
+        val now = ts
+
+        // 물건 추적: 같은 물건이면 이전 검색 결과를 그대로 씁니다
+        val pairs = mutableListOf<Triple<Float, Int, ObjTrack>>()
+        dets.forEachIndexed { i, (r, _, _) -> objTracks.forEach { t -> val v = iou(r, t.rect); if (v > 0.25f) pairs += Triple(v, i, t) } }
+        pairs.sortByDescending { it.first }
+        val usedDet = HashSet<Int>(); val usedTrack = HashSet<ObjTrack>()
+        for ((_, i, t) in pairs) {
+            if (i in usedDet || t in usedTrack) continue
+            usedDet += i; usedTrack += t
+            val (r, label, score) = dets[i]
+            t.rect = r; t.label = label; t.score = score; t.lastSeen = now; t.frames++
+        }
+        dets.forEachIndexed { i, (r, label, score) -> if (i !in usedDet) objTracks += ObjTrack(nextObjId++, r, label, score, now) }
+        objTracks.removeAll { now - it.lastSeen > ObjTrack.LOST_MS }
+
+        val visible = objTracks.filter { now - it.lastSeen < 400 }
+        val main = visible.maxByOrNull { it.score * it.rect.width() * it.rect.height() }
+        val key = Store.apiKey(this)
+
+        if (key.isNotEmpty()) {
+            // 실시간 검색: 물건이 0.3초(3프레임) 보이면 바로 검색 (동시에 최대 3개)
+            val auto = Store.autoProduct(this)
+            val manual = manualAsk.also { manualAsk = false }
+            if (manual && main != null) { main.asked = false; main.info = null }
+            val candidates = if (auto || manual) visible.filter { !it.asked && it.frames >= 3 }.sortedByDescending { it === main } else emptyList()
+            for (t in candidates) {
+                if (inFlight.get() >= 3) break
+                t.asked = true; t.searching = true
+                inFlight.incrementAndGet()
+                val crop = cropFor(bmp, t.rect)
+                val hint = LocalProducts.korean(t.label)
+                aiExec.execute {
+                    val info = runCatching { ProductAI.describe(key, crop, hint) { partial -> t.info = partial; refreshPanel() } }
+                        .getOrElse { ProductInfo("검색 실패", "", "", it.message ?: "알 수 없는 오류", emptyList(), "오류") }
+                    crop.recycle()
+                    t.info = info; t.searching = false
+                    inFlight.decrementAndGet()
+                    refreshPanel()
+                }
+            }
+            if (manual && main == null && inFlight.get() < 3) {
+                // 인식된 물건이 없으면 화면 가운데를 검색
+                val crop = cropFor(bmp, null)
+                inFlight.incrementAndGet()
+                overlay.product = ProductInfo("검색 중", "", "", "", emptyList(), "Claude 검색 중...")
+                aiExec.execute {
+                    val info = runCatching { ProductAI.describe(key, crop, null) { overlay.product = it } }
+                        .getOrElse { ProductInfo("검색 실패", "", "", it.message ?: "알 수 없는 오류", emptyList(), "오류") }
+                    crop.recycle(); inFlight.decrementAndGet()
+                    overlay.product = info
+                }
+            }
+        }
+        panelTrack = main
+        refreshPanel()
+
+        setStatus(when {
+            main == null -> "제품을 화면에 비춰 주세요"
+            main.searching -> "${LocalProducts.korean(main.label)} 인식 · 실시간 검색 중..."
+            else -> "물건 ${visible.size}개 인식 · 패널을 누르면 웹 검색"
+        })
+        val objs = visible.map { ObjInfo(it.id, RectF(it.rect), it.label, it.score, it.info, it.searching) }
+        return LiveFrame(bmp.width, bmp.height, emptyList(), objs)
+    }
+
+    @Volatile private var panelTrack: ObjTrack? = null
+
+    /** 왼쪽 위 패널: 주 대상 물건의 검색 결과(없으면 기기 내 기본 설명). */
+    private fun refreshPanel() {
+        val t = panelTrack ?: return
+        val info = t.info
+        overlay.product = when {
+            info != null -> if (t.searching && info.source.isEmpty()) info.copy(source = "Claude 검색 중...") else info
+            Store.apiKey(this).isEmpty() -> LocalProducts.info(t.label)?.copy(features = listOf("API 키를 넣으면 실제 제품명과 자세한 설명을 실시간으로 볼 수 있습니다"))
+            t.searching -> (LocalProducts.info(t.label) ?: ProductInfo(t.label, "", "", "", emptyList(), "")).copy(source = "Claude 검색 중...")
+            else -> LocalProducts.info(t.label)
+        }
+    }
+
+    /** GPU 로 먼저 시도하고, 안 되면 CPU 로. */
+    private fun createDetector(): ObjectDetector {
+        fun make(d: Delegate) = ObjectDetector.createFromOptions(this, ObjectDetector.ObjectDetectorOptions.builder()
+            .setBaseOptions(BaseOptions.builder().setModelAssetPath("efficientdet_lite0.tflite").setDelegate(d).build())
             .setRunningMode(RunningMode.VIDEO)
             .setMaxResults(5)
             .setScoreThreshold(0.4f)
-            .build()).also { detector = it }
-        val res = det.detectForVideo(BitmapImageBuilder(bmp).build(), ts)
-        val objs = res.detections().mapNotNull { d ->
-            val c = d.categories().firstOrNull() ?: return@mapNotNull null
-            if (c.categoryName() == "person") return@mapNotNull null // 사람은 제품이 아니므로 제외
-            ObjInfo(RectF(d.boundingBox()), c.categoryName(), c.score())
-        }
-        // 가장 크고 확실한 사물을 주 대상으로
-        val main = objs.maxByOrNull { it.score * it.rect.width() * it.rect.height() }
-        if (main != null && main.label == stableLabel) stableCount++ else { stableLabel = main?.label; stableCount = if (main != null) 1 else 0 }
-
-        val key = Store.apiKey(this)
-        val now = SystemClock.uptimeMillis()
-        val stable = main != null && stableCount >= 8
-        val auto = stable && Store.autoProduct(this) && main!!.label != lastAskedLabel && now - lastAskTime > 4000
-        if (key.isEmpty()) {
-            if (stable) LocalProducts.info(main!!.label)?.let { info -> if (overlay.product?.name != info.name) overlay.product = info.copy(features = listOf("API 키를 넣으면 실제 제품명과 자세한 설명을 볼 수 있습니다")) }
-            manualAsk = false
-        } else if (!aiBusy && (auto || manualAsk)) {
-            manualAsk = false
-            lastAskedLabel = main?.label; lastAskTime = now
-            val crop = cropFor(bmp, main?.rect)
-            val hint = main?.label?.let { LocalProducts.korean(it) }
-            aiBusy = true
-            val local = main?.let { LocalProducts.info(it.label) }
-            overlay.product = (local ?: ProductInfo("분석 중", "", "", "", emptyList(), "")).copy(source = "Claude 분석 중...")
-            aiExec.execute {
-                val info = runCatching { ProductAI.describe(key, crop, hint) }
-                    .getOrElse { ProductInfo("분석 실패", "", "", it.message ?: "알 수 없는 오류", emptyList(), "오류") }
-                crop.recycle()
-                overlay.product = info
-                aiBusy = false
-            }
-        }
-        runOnUiThread {
-            status.text = when {
-                main == null -> "제품을 화면 가운데에 비춰 주세요"
-                aiBusy -> "${LocalProducts.korean(main.label)} 인식 · Claude 분석 중..."
-                else -> "${LocalProducts.korean(main.label)} 인식 (${(main.score * 100).toInt()}%)"
-            }
-        }
-        return LiveFrame(bmp, emptyList(), objs)
+            .build())
+        return runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
     }
 
     /** 분석용 사진: 사물 영역(여유 15%), 없으면 화면 가운데. 긴 변 768px. */
@@ -442,7 +529,7 @@ class FillCenter(vw: Int, vh: Int, bw: Int, bh: Int) {
 }
 
 /** 얼굴 스캔 상태, 사물 상자, 제품 설명 패널을 그리는 투명한 위층. */
-class OverlayView(ctx: Context) : View(ctx) {
+class OverlayView(ctx: Context, private val onPanelTap: (ProductInfo) -> Unit) : View(ctx) {
     private val latest = AtomicReference<LiveFrame?>()
     @Volatile var product: ProductInfo? = null
         set(v) { field = v; postInvalidate() }
@@ -454,7 +541,17 @@ class OverlayView(ctx: Context) : View(ctx) {
     private val title = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 18 * d; isFakeBoldText = true }
     private val small = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(190, 220, 255); textSize = 12 * d }
 
+    private var panelRect: RectF? = null
+
     fun post(f: LiveFrame) { latest.set(f); postInvalidate() }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        val r = panelRect ?: return false
+        val p = product ?: return false
+        if (!r.contains(e.x, e.y)) return false
+        if (e.action == MotionEvent.ACTION_UP) onPanelTap(p)
+        return true
+    }
 
     override fun onDraw(c: Canvas) {
         val f = latest.get()
@@ -463,7 +560,8 @@ class OverlayView(ctx: Context) : View(ctx) {
             for (face in f.faces) drawFace(c, m, face)
             for (o in f.objects) drawObject(c, m, o)
         }
-        product?.let { drawPanel(c, it) }
+        val p = product
+        if (p != null) drawPanel(c, p) else panelRect = null
     }
 
     private fun corners(c: Canvas, r: RectF, color: Int) {
@@ -503,9 +601,12 @@ class OverlayView(ctx: Context) : View(ctx) {
 
     private fun drawObject(c: Canvas, m: FillCenter, o: ObjInfo) {
         val r = m.rect(o.rect)
-        box.color = Color.rgb(255, 196, 0)
+        val known = o.info != null && o.info.source != "오류"
+        box.color = if (known) Color.rgb(80, 230, 120) else Color.rgb(255, 196, 0)
         c.drawRoundRect(r, 10 * d, 10 * d, box)
-        pill(c, "${LocalProducts.korean(o.label)} ${(o.score * 100).toInt()}%", r.left, r.top - 4 * d, Color.argb(210, 140, 95, 0))
+        val name = if (known) o.info!!.name else LocalProducts.korean(o.label)
+        val label = if (o.searching && !known) "$name · 검색 중..." else name
+        pill(c, label, r.left, r.top - 4 * d, if (known) Color.argb(210, 20, 110, 50) else Color.argb(210, 140, 95, 0))
     }
 
     /** 왼쪽 위 제품 설명 패널 */
@@ -521,12 +622,15 @@ class OverlayView(ctx: Context) : View(ctx) {
         if (meta.isNotEmpty()) parts += layout(meta, small)
         if (p.description.isNotBlank()) parts += layout(p.description, text)
         p.features.take(3).forEach { parts += layout("• $it", text) }
-        if (p.source.isNotBlank()) parts += layout(p.source, small)
+        val src = listOf(p.source, if (p.source.startsWith("Claude 분석") && !p.source.contains("중")) "눌러서 웹 검색" else "").filter { it.isNotBlank() }.joinToString(" · ")
+        if (src.isNotBlank()) parts += layout(src, small)
         val gap = 6 * d
         val h = pad * 2 + parts.sumOf { it.height.toDouble() }.toFloat() + gap * (parts.size - 1)
         val left = 12 * d; val top = topInset + 12 * d
         fill.color = Color.argb(205, 15, 18, 26)
-        c.drawRoundRect(RectF(left, top, left + w, top + h), 14 * d, 14 * d, fill)
+        val pr = RectF(left, top, left + w, top + h)
+        panelRect = pr
+        c.drawRoundRect(pr, 14 * d, 14 * d, fill)
         var y = top + pad
         for (l in parts) {
             c.save(); c.translate(left + pad, y); l.draw(c); c.restore()
@@ -540,7 +644,6 @@ class LiveRenderer : GLSurfaceView.Renderer {
     @Volatile var mode = MeshGL.MODE_TEXTURE
     @Volatile var sideOverride = 0 // 0 자동(얼굴마다 고정된 쪽), 1 왼쪽, 2 오른쪽
     private val pending = AtomicReference<LiveFrame?>()
-    private val bg = MeshGL()
     private val models = HashMap<Int, MeshGL>()
     private val modelSeen = HashMap<Int, Long>()
     private val boxes = HashMap<Int, RectF>()
@@ -551,13 +654,12 @@ class LiveRenderer : GLSurfaceView.Renderer {
     private val proj = FloatArray(16); private val view = FloatArray(16)
     private val model = FloatArray(16); private val tmp = FloatArray(16); private val mvp = FloatArray(16)
 
-    fun post(f: LiveFrame) { pending.getAndSet(f)?.bitmap?.recycle() }
+    fun post(f: LiveFrame) { pending.set(f) }
 
     override fun onSurfaceCreated(g: GL10?, config: EGLConfig?) {
-        bg.init()
         models.clear(); modelSeen.clear(); boxes.clear()
         current = null
-        GLES20.glClearColor(0f, 0f, 0f, 1f)
+        GLES20.glClearColor(0f, 0f, 0f, 0f) // 투명: 아래의 카메라 미리보기가 보이도록
         Matrix.perspectiveM(proj, 0, 35f, 1f, 0.1f, 50f)
         Matrix.setLookAtM(view, 0, 0f, 0f, 4.2f, 0f, 0f, 0f, 0f, 1f, 0f)
     }
@@ -572,8 +674,6 @@ class LiveRenderer : GLSurfaceView.Renderer {
         if (yaw < -360f) yaw += 360f
 
         pending.getAndSet(null)?.let { f ->
-            bg.uploadTexture(f.bitmap)
-            current?.bitmap?.recycle()
             current = f
             for (face in f.faces) {
                 val fm = face.model ?: continue
@@ -592,8 +692,6 @@ class LiveRenderer : GLSurfaceView.Renderer {
         val f = current ?: return
         val bw = f.w; val bh = f.h
         val m = FillCenter(vw, vh, bw, bh)
-        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
-        bg.drawBackground(-m.ox / m.s / bw, (vw - m.ox) / m.s / bw, -m.oy / m.s / bh, (vh - m.oy) / m.s / bh)
 
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         for (face in f.faces) {

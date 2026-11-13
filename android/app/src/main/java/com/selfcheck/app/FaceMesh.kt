@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import kotlin.math.atan2
@@ -37,6 +38,16 @@ object FaceMesh {
             .setOutputFaceBlendshapes(blendshapes)
             .build()
         return FaceLandmarker.createFromOptions(ctx, opts)
+    }
+
+    /** 실시간용: GPU 로 먼저 시도하고, 안 되면 CPU 로. 얼굴 최대 5개. */
+    fun createFast(ctx: Context): FaceLandmarker {
+        fun make(d: Delegate) = FaceLandmarker.createFromOptions(ctx, FaceLandmarker.FaceLandmarkerOptions.builder()
+            .setBaseOptions(BaseOptions.builder().setModelAssetPath("face_landmarker.task").setDelegate(d).build())
+            .setRunningMode(RunningMode.VIDEO)
+            .setNumFaces(5)
+            .build())
+        return runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
     }
 
     fun analyze(ctx: Context, bmp: Bitmap): FaceMeshResult? {
