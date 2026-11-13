@@ -20,6 +20,9 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".PhotoActivity" android:exported="false" />
+        <activity android:name=".Face3DActivity" android:exported="false" />
+
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"

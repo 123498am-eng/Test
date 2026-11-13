@@ -13,6 +13,8 @@ import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.Button
+import android.widget.HorizontalScrollView
+import android.widget.ImageView
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -35,6 +37,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var usernameInput: EditText
     private lateinit var photoInfo: TextView
+    private lateinit var thumbs: LinearLayout
     private lateinit var repeatBox: CheckBox
     private lateinit var startBtn: Button
     private lateinit var progressBar: ProgressBar
@@ -78,6 +81,9 @@ class MainActivity : ComponentActivity() {
         root.addView(label("2. 내 얼굴 사진 (선택, 3~5장 권장)"))
         photoInfo = hint("")
         root.addView(photoInfo)
+        thumbs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        root.addView(HorizontalScrollView(this).apply { addView(thumbs) },
+            LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) })
         root.addView(row(
             button("사진 고르기") { pickRefs.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
             button("사진 지우기") { FaceMatcher.refsDir(this).listFiles()?.forEach { it.delete() }; refreshPhotoInfo() },
@@ -137,9 +143,36 @@ class MainActivity : ComponentActivity() {
 
     private fun saveNames() = Store.setUsernames(this, usernameInput.text.toString())
 
+    override fun onResume() {
+        super.onResume()
+        if (::thumbs.isInitialized) refreshPhotoInfo()
+    }
+
     private fun refreshPhotoInfo() {
-        val n = FaceMatcher.refsDir(this).listFiles()?.size ?: 0
-        photoInfo.text = if (n == 0) "등록된 사진 없음 (사진 없이도 아이디 점검은 됩니다)" else "등록된 사진 ${n}장"
+        val files = FaceMatcher.refsDir(this).listFiles()?.sortedBy { it.name } ?: emptyList()
+        photoInfo.text = if (files.isEmpty()) "등록된 사진 없음 (사진 없이도 아이디 점검은 됩니다)"
+        else "등록된 사진 ${files.size}장 · 사진을 누르면 사진 정보와 3D 얼굴 모델을 볼 수 있습니다"
+        thumbs.removeAllViews()
+        val size = dp(84)
+        for (f in files) {
+            val iv = ImageView(this).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setBackgroundColor(Color.LTGRAY)
+                setOnClickListener {
+                    startActivity(Intent(this@MainActivity, PhotoActivity::class.java).putExtra("path", f.absolutePath))
+                }
+            }
+            thumbs.addView(iv, LinearLayout.LayoutParams(size, size).apply { rightMargin = dp(6) })
+            thread {
+                val bmp = runCatching {
+                    android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(f)) { d, info, _ ->
+                        val sc = 256.0 / maxOf(info.size.width, info.size.height)
+                        if (sc < 1) d.setTargetSize((info.size.width * sc).toInt().coerceAtLeast(1), (info.size.height * sc).toInt().coerceAtLeast(1))
+                    }
+                }.getOrNull()
+                if (bmp != null) runOnUiThread { iv.setImageBitmap(bmp) }
+            }
+        }
     }
 
     private fun saveRefs(uris: List<Uri>) {

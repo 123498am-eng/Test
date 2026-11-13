@@ -29,10 +29,13 @@ android {
     }
     kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
     packaging { jniLibs { useLegacyPackaging = false } }
+    androidResources { noCompress += "task" }
 }
 
 dependencies {
     implementation("org.opencv:opencv:4.12.0")
     implementation("androidx.work:work-runtime:2.10.5")
     implementation("androidx.activity:activity-ktx:1.10.1")
+    implementation("androidx.exifinterface:exifinterface:1.4.1")
+    implementation("com.google.mediapipe:tasks-vision:0.10.29")
 }
