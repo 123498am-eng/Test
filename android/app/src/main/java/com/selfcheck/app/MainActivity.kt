@@ -107,6 +107,10 @@ class MainActivity : ComponentActivity() {
         }
         root.addView(startBtn, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
 
+        root.addView(button("실시간 카메라 3D") {
+            startActivity(Intent(this, LiveActivity::class.java))
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
         root.addView(button("의심 사진을 내 얼굴과 비교") {
             pickSuspects.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))

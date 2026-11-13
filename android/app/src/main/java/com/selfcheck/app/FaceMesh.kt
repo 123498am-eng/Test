@@ -29,14 +29,18 @@ object FaceMesh {
         .readText().split(Regex("\\s+")).filter { it.isNotEmpty() }.map { it.toInt() }.toIntArray()
         .also { tris = it }
 
-    fun analyze(ctx: Context, bmp: Bitmap): FaceMeshResult? {
+    fun create(ctx: Context, mode: RunningMode, numFaces: Int, blendshapes: Boolean): FaceLandmarker {
         val opts = FaceLandmarker.FaceLandmarkerOptions.builder()
             .setBaseOptions(BaseOptions.builder().setModelAssetPath("face_landmarker.task").build())
-            .setRunningMode(RunningMode.IMAGE)
-            .setNumFaces(5)
-            .setOutputFaceBlendshapes(true)
+            .setRunningMode(mode)
+            .setNumFaces(numFaces)
+            .setOutputFaceBlendshapes(blendshapes)
             .build()
-        val lm = FaceLandmarker.createFromOptions(ctx, opts)
+        return FaceLandmarker.createFromOptions(ctx, opts)
+    }
+
+    fun analyze(ctx: Context, bmp: Bitmap): FaceMeshResult? {
+        val lm = create(ctx, RunningMode.IMAGE, 5, true)
         try {
             val res = lm.detect(BitmapImageBuilder(bmp).build())
             val faces = res.faceLandmarks()

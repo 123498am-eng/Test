@@ -39,20 +39,20 @@ class FaceMatcher(ctx: Context, onStatus: (String) -> Unit = {}) {
             return f
         }
 
-        private fun decode(src: ImageDecoder.Source): Bitmap {
+        private fun decode(src: ImageDecoder.Source, maxSideLimit: Int = 1024): Bitmap {
             val bmp = ImageDecoder.decodeBitmap(src) { decoder, info, _ ->
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 val w = info.size.width; val h = info.size.height
                 val maxSide = maxOf(w, h)
-                if (maxSide > 1024) {
-                    val s = 1024.0 / maxSide
+                if (maxSide > maxSideLimit) {
+                    val s = maxSideLimit.toDouble() / maxSide
                     decoder.setTargetSize((w * s).toInt().coerceAtLeast(1), (h * s).toInt().coerceAtLeast(1))
                 }
             }
             return if (bmp.config == Bitmap.Config.ARGB_8888) bmp else bmp.copy(Bitmap.Config.ARGB_8888, false)
         }
 
-        fun decodeFile(f: File) = decode(ImageDecoder.createSource(f))
+        fun decodeFile(f: File, maxSide: Int = 1024) = decode(ImageDecoder.createSource(f), maxSide)
         fun decodeUri(cr: ContentResolver, uri: Uri) = decode(ImageDecoder.createSource(cr, uri))
         fun decodeBytes(b: ByteArray) = decode(ImageDecoder.createSource(ByteBuffer.wrap(b)))
     }
