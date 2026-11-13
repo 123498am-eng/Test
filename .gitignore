@@ -2,3 +2,9 @@ __pycache__/
 selfcheck/models/
 reports/
 me/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.kotlin/
+*.apk
