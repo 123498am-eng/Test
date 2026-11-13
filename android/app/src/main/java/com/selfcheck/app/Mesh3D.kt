@@ -300,6 +300,12 @@ class MeshGL {
         trisRef = null; posBuf = null; uvBuf = null; norBuf = null
     }
 
+    fun release() {
+        if (tex != 0) GLES20.glDeleteTextures(1, intArrayOf(tex), 0)
+        if (prog != 0) GLES20.glDeleteProgram(prog)
+        tex = 0; prog = 0
+    }
+
     fun uploadTexture(bmp: Bitmap) {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex)
         val pot = bmp.width == bmp.height && (bmp.width and (bmp.width - 1)) == 0

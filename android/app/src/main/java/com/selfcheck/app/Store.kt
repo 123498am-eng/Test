@@ -19,6 +19,11 @@ object Store {
     fun repeat(ctx: Context) = prefs(ctx).getBoolean("repeat", false)
     fun setRepeat(ctx: Context, v: Boolean) = prefs(ctx).edit().putBoolean("repeat", v).apply()
 
+    fun apiKey(ctx: Context) = prefs(ctx).getString("anthropic_key", "") ?: ""
+    fun setApiKey(ctx: Context, v: String) = prefs(ctx).edit().putString("anthropic_key", v.trim()).apply()
+    fun autoProduct(ctx: Context) = prefs(ctx).getBoolean("auto_product", true)
+    fun setAutoProduct(ctx: Context, v: Boolean) = prefs(ctx).edit().putBoolean("auto_product", v).apply()
+
     private fun resultFile(ctx: Context) = File(ctx.filesDir, "results.json")
 
     fun saveResults(ctx: Context, rows: List<SiteResult>) {

@@ -29,7 +29,8 @@ android {
     }
     kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
     packaging { jniLibs { useLegacyPackaging = false } }
-    androidResources { noCompress += "task" }
+    androidResources { noCompress += listOf("task", "tflite") }
+    packaging { resources { excludes += listOf("META-INF/*.version", "META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/DEPENDENCIES", "META-INF/*.kotlin_module", "META-INF/versions/**") } }
 }
 
 dependencies {
@@ -40,4 +41,5 @@ dependencies {
     implementation("com.google.mediapipe:tasks-vision:0.10.29")
     implementation("androidx.camera:camera-camera2:1.4.2")
     implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("com.anthropic:anthropic-java:3.8.0")
 }
