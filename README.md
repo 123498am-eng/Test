@@ -59,3 +59,25 @@ python selfcheck/run.py --username myid --my-photos ./me --check-folder ./suspec
 | `--timeout` | 15 | 요청 하나당 제한 시간(초) |
 | `--repeat-hours` | 0 | 0보다 크면 이 간격으로 계속 반복 |
 | `--out` | reports | 결과를 저장할 폴더 |
+
+## 안드로이드 앱 (APK)
+
+`android/` 폴더가 같은 기능의 안드로이드 앱입니다 (Android 9 이상, arm64 휴대폰).
+
+- 아이디 입력 → (선택) 내 얼굴 사진 고르기 → **점검 시작**
+- 화면을 꺼도 백그라운드에서 계속 진행되고, 끝나면 알림이 옵니다
+- "24시간마다 자동으로 다시 점검"을 켜면 하루에 한 번 혼자 다시 돌아갑니다
+- "의심 사진을 내 얼굴과 비교"로 갤러리 사진(사칭 계정 스크린샷 등)을 바로 비교할 수 있습니다
+- 얼굴 모델(약 39MB)은 처음 얼굴 비교할 때 한 번만 내려받습니다
+
+설치: APK 파일을 휴대폰으로 옮겨 열고, "출처를 알 수 없는 앱 설치"를 허용하세요.
+디버그 키로 서명되어 있어서 Play 스토어에는 올릴 수 없습니다.
+
+직접 빌드하기 (JDK 17 이상, Android SDK 필요):
+
+```bash
+cd android
+echo "sdk.dir=/path/to/android-sdk" > local.properties
+./gradlew assembleRelease
+# 결과: android/app/build/outputs/apk/release/app-release.apk
+```
