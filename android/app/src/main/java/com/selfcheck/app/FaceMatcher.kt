@@ -53,7 +53,7 @@ class FaceMatcher(ctx: Context, onStatus: (String) -> Unit = {}) {
         }
 
         fun decodeFile(f: File, maxSide: Int = 1024) = decode(ImageDecoder.createSource(f), maxSide)
-        fun decodeUri(cr: ContentResolver, uri: Uri) = decode(ImageDecoder.createSource(cr, uri))
+        fun decodeUri(cr: ContentResolver, uri: Uri, maxSide: Int = 1024) = decode(ImageDecoder.createSource(cr, uri), maxSide)
         fun decodeBytes(b: ByteArray) = decode(ImageDecoder.createSource(ByteBuffer.wrap(b)))
     }
 

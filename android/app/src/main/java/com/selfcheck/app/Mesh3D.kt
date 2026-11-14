@@ -181,10 +181,18 @@ class MeshData(val pos: FloatArray, val uv: FloatArray, val normal: FloatArray, 
         }
 
         /**
-         * 얼굴 기준 좌표계로 정면 보정 (오른쪽 눈꼬리 33, 왼쪽 263, 이마 10, 턱 152).
-         * 결과는 가운데 정렬, 대략 [-1, 1] 크기. 점 468개만 다루므로 매 프레임 돌려도 가볍습니다.
+         * 얼굴 기준 좌표계 (오른쪽 눈꼬리 33, 왼쪽 263, 이마 10, 턱 152로 정함).
+         * ex·ey·ez: 얼굴의 오른쪽·위·앞 방향, c: 중심, s: 크기 배율, zOff: 깊이 보정, faceH: 이마~턱 길이.
          */
-        fun frontal(base: FloatArray): FloatArray {
+        class FaceFrame(val c: FloatArray, val ex: FloatArray, val ey: FloatArray, val ez: FloatArray, val s: Float, val zOff: Float, val faceH: Float) {
+            /** 얼굴 좌표 → 사진 좌표 (이 프레임 기준) */
+            fun toImage(fx: Float, fy: Float, fz: Float, out: FloatArray, o: Int) {
+                val z = fz + zOff
+                for (k in 0..2) out[o + k] = c[k] + (ex[k] * fx + ey[k] * fy + ez[k] * z) / s
+            }
+        }
+
+        fun faceFrame(base: FloatArray): FaceFrame {
             val n = base.size / 3
             fun p(i: Int) = floatArrayOf(base[i * 3], base[i * 3 + 1], base[i * 3 + 2])
             val r = p(33); val l = p(263); val top = p(10); val chin = p(152)
@@ -196,14 +204,25 @@ class MeshData(val pos: FloatArray, val uv: FloatArray, val normal: FloatArray, 
             val c = FloatArray(3)
             for (i in 0 until n) for (k in 0..2) c[k] += base[i * 3 + k] / n
             val s = 2f / (faceH * 1.15f)
-            val out = FloatArray(n * 3)
             var meanZ = 0f
             for (i in 0 until n) {
                 val d = floatArrayOf(base[i * 3] - c[0], base[i * 3 + 1] - c[1], base[i * 3 + 2] - c[2])
-                out[i * 3] = dot(d, ex) * s; out[i * 3 + 1] = dot(d, ey) * s; out[i * 3 + 2] = dot(d, ez) * s
-                meanZ += out[i * 3 + 2] / n
+                meanZ += dot(d, ez) * s / n
             }
-            for (i in 0 until n) out[i * 3 + 2] -= meanZ
+            return FaceFrame(c, ex, ey, ez, s, meanZ, faceH)
+        }
+
+        /**
+         * 얼굴 기준 좌표계로 정면 보정. 결과는 가운데 정렬, 대략 [-1, 1] 크기.
+         * 점 468개만 다루므로 매 프레임 돌려도 가볍습니다.
+         */
+        fun frontal(base: FloatArray, f: FaceFrame = faceFrame(base)): FloatArray {
+            val n = base.size / 3
+            val out = FloatArray(n * 3)
+            for (i in 0 until n) {
+                val d = floatArrayOf(base[i * 3] - f.c[0], base[i * 3 + 1] - f.c[1], base[i * 3 + 2] - f.c[2])
+                out[i * 3] = dot(d, f.ex) * f.s; out[i * 3 + 1] = dot(d, f.ey) * f.s; out[i * 3 + 2] = dot(d, f.ez) * f.s - f.zOff
+            }
             return out
         }
 

@@ -107,6 +107,10 @@ class MainActivity : ComponentActivity() {
         }
         root.addView(startBtn, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
 
+        root.addView(button("편집 (표정 따라하기 · 배경 제거)") {
+            startActivity(Intent(this, EditActivity::class.java))
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
         root.addView(button("실시간 카메라 3D") {
             startActivity(Intent(this, LiveActivity::class.java))
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))

@@ -24,6 +24,9 @@
 
         <activity android:name=".PhotoActivity" android:exported="false" />
         <activity android:name=".Face3DActivity" android:exported="false" />
+        <activity android:name=".EditActivity" android:exported="false" />
+        <activity android:name=".ReenactActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".BgRemoveActivity" android:exported="false" />
         <activity android:name=".LiveActivity" android:exported="false" android:screenOrientation="portrait" />
 
         <service
