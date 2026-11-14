@@ -446,17 +446,18 @@ object Cutout {
                 org.opencv.core.Point(((rect.right + ex) * sc).toDouble(), ((rect.bottom + ey) * sc).toDouble()), Scalar(255.0), -1)
             val offs = listOf(0f to 0f, -0.22f to -0.22f, 0.22f to -0.22f, -0.22f to 0.22f, 0.22f to 0.22f, 0f to -0.3f, 0f to 0.3f).take(points)
             val union = Mat.zeros(h, w, CvType.CV_8U)
+            val cmax = Mat.zeros(h, w, CvType.CV_32F) // 인정한 AI 결과의 확신도 최댓값 (구멍 메우기 판단용)
             val inside = Mat()
             for ((ox, oy) in offs) {
                 val px = rect.centerX() + ox * rect.width(); val py = rect.centerY() + oy * rect.height()
                 val conf = aiConf(seg, small, px / src.width, py / src.height) ?: continue
-                val bin = Mat(); Imgproc.threshold(conf, bin, 0.5, 255.0, Imgproc.THRESH_BINARY); conf.release()
+                val bin = Mat(); Imgproc.threshold(conf, bin, 0.5, 255.0, Imgproc.THRESH_BINARY)
                 bin.convertTo(bin, CvType.CV_8U)
                 val area = Core.countNonZero(bin)
-                if (area < w * h / 500) { bin.release(); continue }
+                if (area < w * h / 500) { bin.release(); conf.release(); continue }
                 Core.bitwise_and(bin, lim, inside)
-                if (Core.countNonZero(inside) >= area * 0.7) Core.bitwise_or(union, bin, union) // 대부분 사각형 근처면 물체로 인정
-                bin.release()
+                if (Core.countNonZero(inside) >= area * 0.7) { Core.bitwise_or(union, bin, union); Core.max(cmax, conf, cmax) } // 대부분 사각형 근처면 물체로 인정
+                bin.release(); conf.release()
             }
             inside.release()
             lim.release()
@@ -467,18 +468,22 @@ object Cutout {
             Core.bitwise_and(union, big, union); big.release()
             keepTouching(union, org.opencv.core.Rect((rect.left * sc).toInt(), (rect.top * sc).toInt(), (rect.width() * sc).toInt().coerceAtLeast(1), (rect.height() * sc).toInt().coerceAtLeast(1)))
             // 사람이면 사람 분할로 빠진 얼굴 등을 채움
+            var pKeep: Mat? = null
             if (person != null) runCatching {
                 personConfCrop(person, small, RectF(rect.left * sc, rect.top * sc, rect.right * sc, rect.bottom * sc))?.let { pc ->
                     personFix(union, pc, org.opencv.core.Rect((rect.left * sc).toInt(), (rect.top * sc).toInt(), (rect.width() * sc).toInt().coerceAtLeast(1), (rect.height() * sc).toInt().coerceAtLeast(1)))
-                    pc.release()
+                    pKeep = pc
                 }
             }
             if (Core.countNonZero(union) < w * h / 400) { union.release(); return null }
             // 마지막 정리: 사각형과 거의 겹치지 않는 덩어리(옆 사람 일부 등)는 버림
             keepTouching(union, org.opencv.core.Rect((rect.left * sc).toInt(), (rect.top * sc).toInt(), (rect.width() * sc).toInt().coerceAtLeast(1), (rect.height() * sc).toInt().coerceAtLeast(1)))
-            fillHoles(union)
-            Imgproc.GaussianBlur(union, union, Size(0.0, 0.0), 1.2) // 경계만 부드럽게
-            return union
+            // 구멍은 AI 가 물체/사람일 가능성이 있다고 본 곳만 메움 (팔과 몸 사이 잔디 같은 진짜 배경은 그대로 지움)
+            val probable = Mat(); Imgproc.threshold(cmax, probable, 0.3, 255.0, Imgproc.THRESH_BINARY); probable.convertTo(probable, CvType.CV_8U)
+            pKeep?.let { pc -> val pp = Mat(); Imgproc.threshold(pc, pp, 0.4, 255.0, Imgproc.THRESH_BINARY); pp.convertTo(pp, CvType.CV_8U); Core.bitwise_or(probable, pp, probable); pp.release(); pc.release() }
+            fillHoles(union, probable)
+            probable.release(); cmax.release()
+            return union // 경계는 refine() 에서 원본 사진 경계에 맞춰 다듬습니다
         } finally {
             if (small !== src) small.recycle()
         }
@@ -508,8 +513,9 @@ object Cutout {
         listOf(labels, stats, cent, keep, comp, compIn).forEach { it.release() }
     }
 
-    /** 물체 안쪽에 생긴 구멍(물체 넓이의 8% 이하)을 메웁니다 */
-    private fun fillHoles(m: Mat) {
+    /** 물체 안쪽에 생긴 구멍(물체 넓이의 15% 이하) 중 probable 인 곳만 메웁니다 */
+    private fun fillHoles(m: Mat, probable: Mat) {
+        val orig = m.clone()
         val k = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(7.0, 7.0))
         Imgproc.morphologyEx(m, m, Imgproc.MORPH_CLOSE, k)
         val contours = ArrayList<org.opencv.core.MatOfPoint>(); val hier = Mat()
@@ -520,6 +526,11 @@ object Cutout {
             if (parent >= 0 && Imgproc.contourArea(contours[i]) <= total * 0.15) Imgproc.drawContours(m, contours, i, Scalar(255.0), -1)
         }
         hier.release()
+        // 새로 메운 곳 = m - orig, 그중 probable 인 곳만 남김
+        val added = Mat(); Core.subtract(m, orig, added)
+        Core.bitwise_and(added, probable, added)
+        Core.bitwise_or(orig, added, m)
+        orig.release(); added.release()
     }
 
     private fun personSegmenter(ctx: Context): ImageSegmenter? = runCatching {
@@ -536,13 +547,71 @@ object Cutout {
         return runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
     }
 
+    private fun box(src: Mat, r: Int): Mat { val d = Mat(); Imgproc.boxFilter(src, d, -1, Size(2.0 * r + 1, 2.0 * r + 1)); return d }
+
+    /**
+     * 작은 크기의 마스크를 원래 크기로 키우면서, 원본 사진의 실제 경계에 맞춰 다듬습니다 (가이디드 필터).
+     * 단순히 늘려서 흐리게 하면 경계가 뭉개지고 배경이 비쳐 부자연스러웠습니다.
+     */
+    fun refine(src: Bitmap, small: Mat): Mat {
+        val W = src.width; val H = src.height
+        val sc = min(1.0, 1600.0 / max(W, H))
+        val gw = (W * sc).toInt().coerceAtLeast(1); val gh = (H * sc).toInt().coerceAtLeast(1)
+        val rgba = Mat(); Utils.bitmapToMat(src, rgba)
+        val g = Mat(); Imgproc.cvtColor(rgba, g, Imgproc.COLOR_RGBA2GRAY); rgba.release()
+        if (sc < 1.0) Imgproc.resize(g, g, Size(gw.toDouble(), gh.toDouble()), 0.0, 0.0, Imgproc.INTER_AREA)
+        val I = Mat(); g.convertTo(I, CvType.CV_32F, 1.0 / 255.0); g.release()
+        val p = Mat(); Imgproc.resize(small, p, Size(gw.toDouble(), gh.toDouble()), 0.0, 0.0, Imgproc.INTER_LINEAR)
+        p.convertTo(p, CvType.CV_32F, 1.0 / 255.0)
+        val r = max(2, max(gw, gh) / 150); val eps = 1e-3
+        val mI = box(I, r); val mp = box(p, r)
+        val ii = Mat(); Core.multiply(I, I, ii); val cI = box(ii, r)
+        val ip = Mat(); Core.multiply(I, p, ip); val cIp = box(ip, r)
+        val varI = Mat(); Core.multiply(mI, mI, varI); Core.subtract(cI, varI, varI); Core.add(varI, Scalar(eps), varI)
+        val cov = Mat(); Core.multiply(mI, mp, cov); Core.subtract(cIp, cov, cov)
+        val a = Mat(); Core.divide(cov, varI, a)
+        val b = Mat(); Core.multiply(a, mI, b); Core.subtract(mp, b, b)
+        val ma = box(a, r); val mb = box(b, r)
+        val q = Mat(); Core.multiply(ma, I, q); Core.add(q, mb, q)
+        // 0.15~0.85 를 0~1 로 늘려 경계를 또렷하게
+        Core.subtract(q, Scalar(0.15), q); Core.multiply(q, Scalar(255.0 / 0.7), q)
+        val out = Mat(); q.convertTo(out, CvType.CV_8U)
+        if (out.cols() != W || out.rows() != H) Imgproc.resize(out, out, Size(W.toDouble(), H.toDouble()), 0.0, 0.0, Imgproc.INTER_LINEAR)
+        listOf(I, p, mI, mp, ii, cI, ip, cIp, varI, cov, a, b, ma, mb, q).forEach { it.release() }
+        return out
+    }
+
+    /**
+     * 색 번짐 제거: 경계(반투명) 화소의 색을 바로 안쪽 물체 색으로 바꿉니다.
+     * 잔디·벽 색이 경계에 묻어 사람 둘레가 초록/주황으로 빛나 보이던 문제를 없앱니다. 결과: RGBA float(0~255)
+     */
+    private fun decontaminate(rgba: Mat, alpha: Mat): Mat {
+        val f = Mat(); rgba.convertTo(f, CvType.CV_32FC4)
+        val hard = Mat(); Imgproc.threshold(alpha, hard, 242.0, 1.0, Imgproc.THRESH_BINARY); hard.convertTo(hard, CvType.CV_32F)
+        val sg = max(2.0, max(rgba.cols(), rgba.rows()) / 300.0)
+        val h4 = Mat(); Core.merge(listOf(hard, hard, hard, hard), h4)
+        val num = Mat(); Core.multiply(f, h4, num); Imgproc.GaussianBlur(num, num, Size(0.0, 0.0), sg)
+        val den = Mat(); Imgproc.GaussianBlur(hard, den, Size(0.0, 0.0), sg); Core.max(den, Scalar(1e-4), den)
+        val d4 = Mat(); Core.merge(listOf(den, den, den, den), d4)
+        val fgEst = Mat(); Core.divide(num, d4, fgEst)
+        // 경계 = 0.01 < alpha < 0.95 이면서 안쪽 물체 색을 알 수 있는 곳
+        val lo = Mat(); Imgproc.threshold(alpha, lo, 2.0, 255.0, Imgproc.THRESH_BINARY)
+        val hi = Mat(); Imgproc.threshold(alpha, hi, 242.0, 255.0, Imgproc.THRESH_BINARY_INV)
+        val edge = Mat(); Core.bitwise_and(lo, hi, edge); lo.convertTo(lo, CvType.CV_8U); edge.convertTo(edge, CvType.CV_8U)
+        val known = Mat(); Imgproc.threshold(den, known, 0.02, 255.0, Imgproc.THRESH_BINARY); known.convertTo(known, CvType.CV_8U)
+        Core.bitwise_and(edge, known, edge)
+        fgEst.copyTo(f, edge)
+        listOf(hard, h4, num, den, d4, fgEst, lo, hi, edge, known).forEach { it.release() }
+        return f
+    }
+
     /** 사진: AI 로 물체 모양 → 원래 크기 알파 마스크. AI 가 못 찾으면 GrabCut. */
     fun photoMask(ctx: Context, src: Bitmap, rect: Rect): Mat {
         val seg = segmenter(ctx)
         val person = personSegmenter(ctx)
         try {
             val m = aiMask(seg, src, RectF(rect), 1024, 7, person) ?: return grabCutMask(src, rect)
-            val full = Mat(); Imgproc.resize(m, full, Size(src.width.toDouble(), src.height.toDouble()), 0.0, 0.0, Imgproc.INTER_LINEAR)
+            val full = refine(src, m)
             m.release()
             return full
         } finally {
@@ -580,7 +649,7 @@ object Cutout {
                 area = RectF(cx - hw, cy - hh, cx + hw, cy + hh)
             }
             val full = Mat()
-            if (m.cols() > 1) Imgproc.resize(m, full, Size(frame.width.toDouble(), frame.height.toDouble()), 0.0, 0.0, Imgproc.INTER_LINEAR)
+            if (m.cols() > 1) refine(frame, m).copyTo(full)
             else { full.create(frame.height, frame.width, CvType.CV_8U); full.setTo(Scalar(0.0)) }
             m.release()
             return full
@@ -591,7 +660,9 @@ object Cutout {
 
     /** 알파 마스크로 물체만 남기고 배경을 바꿉니다. 마스크는 이 함수에서 해제합니다. */
     fun composite(src: Bitmap, alpha: Mat, bg: Backdrop): Bitmap {
-        val rgba = Mat(); Utils.bitmapToMat(src, rgba)
+        val rgba0 = Mat(); Utils.bitmapToMat(src, rgba0)
+        val clean = decontaminate(rgba0, alpha)
+        val rgba = Mat(); clean.convertTo(rgba, CvType.CV_8UC4); clean.release(); rgba0.release()
         val out = Mat()
         if (bg == Backdrop.TRANSPARENT) {
             val ch = ArrayList<Mat>(); Core.split(rgba, ch)

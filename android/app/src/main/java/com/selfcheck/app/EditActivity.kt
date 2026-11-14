@@ -35,6 +35,9 @@ class EditActivity : ComponentActivity() {
         item("배경 제거 (사진·동영상)",
             "사진이나 동영상을 고르고 남길 물체를 사각형으로 감싼 뒤 '편집'을 누르면 나머지 배경이 지워집니다. 배경은 투명·흰색·검정·초록·흐리게 중에서 고를 수 있습니다.",
             BgRemoveActivity::class.java)
+        item("크로마키 (그린·블루 스크린)",
+            "초록이나 파란 배경에서 찍은 사진·동영상의 배경색을 지우고 투명·흰색·검정·다른 사진으로 바꿉니다. 화면을 눌러 지울 색을 고르고, 허용 범위·부드러움·색 번짐 제거·가장자리 줄이기를 조절합니다.",
+            ChromaKeyActivity::class.java)
         setContentView(col)
     }
 }
