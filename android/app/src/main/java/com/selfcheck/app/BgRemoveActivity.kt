@@ -23,6 +23,9 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.MediaController
 import android.widget.ProgressBar
+import android.widget.SeekBar
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.widget.TextView
 import android.widget.Toast
 import android.widget.VideoView
@@ -64,6 +67,8 @@ class BgRemoveActivity : ComponentActivity() {
     private lateinit var editBtn: Button
     private lateinit var saveBtn: Button
     private lateinit var bgBtn: Button
+    private lateinit var brushBar: LinearLayout
+    private var editor: MaskEditView? = null
     private var source: Uri? = null
     private var isVideo = false
     private var image: Bitmap? = null // 사진, 또는 동영상 첫 프레임
@@ -104,6 +109,22 @@ class BgRemoveActivity : ComponentActivity() {
         bgBtn = btn("배경: 투명") { cycleBackdrop() }
         editBtn = btn("편집") { runEdit() }
         saveBtn = btn("저장") { saveResult() }.apply { visibility = View.GONE }
+        // 붓 (사진 결과를 손으로 고치기)
+        brushBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), 0, dp(8), 0); visibility = View.GONE; gravity = Gravity.CENTER_VERTICAL }
+        brushBar.addView(Button(this).apply {
+            text = "붓: 복원"; textSize = 12f
+            setOnClickListener { editor?.let { e -> e.restore = !e.restore; text = if (e.restore) "붓: 복원" else "붓: 지우기" } }
+        }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        brushBar.addView(TextView(this).apply { text = "굵기"; setTextColor(Color.WHITE); textSize = 12f; setPadding(dp(8), 0, dp(4), 0) })
+        brushBar.addView(SeekBar(this).apply {
+            max = 100; progress = 30
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar, p: Int, u: Boolean) { editor?.brushDp = 6f + p * 0.6f }
+                override fun onStartTrackingTouch(sb: SeekBar) {}
+                override fun onStopTrackingTouch(sb: SeekBar) {}
+            })
+        }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1.5f))
+        root.addView(brushBar)
         root.addView(bar)
         setContentView(root)
         check(OpenCVLoader.initLocal()) { "OpenCV를 불러오지 못했습니다" }
@@ -113,13 +134,14 @@ class BgRemoveActivity : ComponentActivity() {
         val all = Backdrop.values().filter { !(isVideo && it == Backdrop.TRANSPARENT) } // 동영상은 투명을 지원하지 않음
         backdrop = all[(all.indexOf(backdrop) + 1) % all.size]
         bgBtn.text = "배경: ${backdrop.label}"
+        editor?.setBackdrop(backdrop)
     }
 
     private fun load(uri: Uri) {
         source = uri
         isVideo = contentResolver.getType(uri)?.startsWith("video") == true
         if (isVideo && backdrop == Backdrop.TRANSPARENT) { backdrop = Backdrop.WHITE; bgBtn.text = "배경: ${backdrop.label}" }
-        result = null; saveBtn.visibility = View.GONE
+        result = null; saveBtn.visibility = View.GONE; brushBar.visibility = View.GONE; editor = null
         showSelector()
         thread {
             val bmp = runCatching {
@@ -148,12 +170,12 @@ class BgRemoveActivity : ComponentActivity() {
         progress.visibility = View.VISIBLE; progress.isIndeterminate = !isVideo
         info.text = "배경을 지우는 중..."
         if (!isVideo) thread {
-            val out = runCatching { Cutout.composite(img, Cutout.photoMask(this, img, rect), backdrop) }
+            val out = runCatching { MaskEditView.maskToBitmap(Cutout.photoMask(this, img, rect)) }
             runOnUiThread {
                 busy = false; editBtn.isEnabled = true; progress.visibility = View.GONE
-                out.onSuccess { r ->
-                    result = r; showImageResult(r); saveBtn.visibility = View.VISIBLE
-                    info.text = "완료. '저장'을 누르면 갤러리에 PNG로 저장됩니다. 다시 하려면 사진을 다시 고르세요."
+                out.onSuccess { mask ->
+                    showEditor(img, mask); saveBtn.visibility = View.VISIBLE; brushBar.visibility = View.VISIBLE
+                    info.text = "완료. 잘못 지워진 곳은 '붓: 복원'으로 문질러 되살리고, 남은 배경은 '붓: 지우기'로 지우세요. 다 되면 '저장'."
                 }.onFailure { info.text = "실패: ${it.message}" }
             }
         } else thread { processVideo(source!!, rect, img.width, img.height) }
@@ -238,10 +260,22 @@ class BgRemoveActivity : ComponentActivity() {
         vv.setOnPreparedListener { it.isLooping = true; vv.start() }
     }
 
+    private fun showEditor(src: Bitmap, mask: Bitmap) {
+        stage.removeAllViews()
+        val e = MaskEditView(this, src, mask, checker())
+        e.setBackdrop(backdrop)
+        editor = e
+        stage.addView(e, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+    }
+
     private fun saveResult() {
-        val r = result ?: return
+        val e = editor
+        val img = image
         thread {
-            val msg = runCatching { MediaSave.savePng(this, r, "bg_removed_${System.currentTimeMillis()}.png") }
+            val msg = runCatching {
+                val r = if (e != null && img != null) Cutout.composite(img, MaskEditView.bitmapToMask(e.mask), backdrop) else result ?: error("결과가 없습니다")
+                MediaSave.savePng(this, r, "bg_removed_${System.currentTimeMillis()}.png")
+            }
                 .fold({ "$it 에 저장했습니다" }, { "저장 실패: ${it.message}" })
             runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
         }
@@ -301,40 +335,98 @@ object Cutout {
         return alpha
     }
 
+    /** AI 한 번: 한 점을 가리켜 그 물체의 확신도(0~1) 맵 */
+    private fun aiConf(seg: InteractiveSegmenter, img: Bitmap, nx: Float, ny: Float): Mat? {
+        val res = seg.segment(BitmapImageBuilder(img).build(),
+            InteractiveSegmenter.RegionOfInterest.create(NormalizedKeypoint.create(nx.coerceIn(0f, 1f), ny.coerceIn(0f, 1f))))
+        val m = res.confidenceMasks().orElse(null)?.firstOrNull() ?: return null
+        val buf = ByteBufferExtractor.extract(m).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        val arr = FloatArray(m.width * m.height); buf.position(0); buf.get(arr)
+        return Mat(m.height, m.width, CvType.CV_32F).also { it.put(0, 0, arr) }
+    }
+
     /**
-     * AI(MediaPipe Interactive Segmenter)로 사각형 가운데를 가리켜 물체 모양을 얻습니다.
-     * 확신도(0~1)를 그대로 부드러운 경계로 쓰고, 사각형을 20% 넓힌 범위까지만 남깁니다
-     * (물체가 사각형 밖으로 조금 나가도 살아남음). 결과는 작은 크기의 0~255 마스크입니다.
+     * 사각형 안 여러 점(가운데 + 네 군데)에서 AI 로 물체를 찾아 합칩니다.
+     * 한 점만 쓰면 물체의 일부분만 잡히거나 구멍이 생겨, 남겨야 할 곳이 지워지던 문제를 줄입니다.
+     * 결과 중 사각형(25% 넓힘) 안에 80% 이상 들어가는 것만 합쳐서, 바깥 배경이 딸려 오지 않게 합니다.
+     * 그 뒤 물체 안쪽의 구멍을 메우고, 경계만 살짝 부드럽게 합니다. 결과: 작은 크기의 0~255 마스크.
      */
-    private fun aiMask(seg: InteractiveSegmenter, src: Bitmap, rect: RectF, keyX: Float, keyY: Float, maxSide: Int): Mat? {
+    private fun aiMask(seg: InteractiveSegmenter, src: Bitmap, rect: RectF, maxSide: Int, points: Int): Mat? {
         val sc = min(1f, maxSide.toFloat() / max(src.width, src.height))
         val small = if (sc < 1f) Bitmap.createScaledBitmap(src, (src.width * sc).toInt(), (src.height * sc).toInt(), true) else src
         try {
-            val res = seg.segment(BitmapImageBuilder(small).build(),
-                InteractiveSegmenter.RegionOfInterest.create(NormalizedKeypoint.create(keyX / src.width, keyY / src.height)))
-            val img = res.confidenceMasks().orElse(null)?.firstOrNull() ?: return null
-            val buf = ByteBufferExtractor.extract(img).order(ByteOrder.nativeOrder()).asFloatBuffer()
-            val w = img.width; val h = img.height
-            val arr = FloatArray(w * h); buf.position(0); buf.get(arr)
-            val conf = Mat(h, w, CvType.CV_32F); conf.put(0, 0, arr)
-            // 0.25~0.75 사이를 부드럽게 (경계는 반투명)
-            Core.subtract(conf, Scalar(0.25), conf); Core.multiply(conf, Scalar(2.0 * 255.0), conf)
-            val m = Mat(); conf.convertTo(m, CvType.CV_8U) // 0 미만/255 초과는 자동으로 잘림
-            conf.release()
-            // 넓힌 사각형 범위 (가장자리는 부드럽게)
-            val sx = w.toFloat() / src.width; val sy = h.toFloat() / src.height
-            val ex = rect.width() * 0.2f; val ey = rect.height() * 0.2f
+            val w = small.width; val h = small.height
+            val ex = rect.width() * 0.25f; val ey = rect.height() * 0.25f
             val lim = Mat.zeros(h, w, CvType.CV_8U)
-            Imgproc.rectangle(lim, org.opencv.core.Point(((rect.left - ex) * sx).toDouble(), ((rect.top - ey) * sy).toDouble()),
-                org.opencv.core.Point(((rect.right + ex) * sx).toDouble(), ((rect.bottom + ey) * sy).toDouble()), Scalar(255.0), -1)
-            Imgproc.GaussianBlur(lim, lim, Size(0.0, 0.0), max(w, h) / 80.0)
-            Core.min(m, lim, m)
+            Imgproc.rectangle(lim, org.opencv.core.Point(((rect.left - ex) * sc).toDouble(), ((rect.top - ey) * sc).toDouble()),
+                org.opencv.core.Point(((rect.right + ex) * sc).toDouble(), ((rect.bottom + ey) * sc).toDouble()), Scalar(255.0), -1)
+            val offs = listOf(0f to 0f, -0.22f to -0.22f, 0.22f to -0.22f, -0.22f to 0.22f, 0.22f to 0.22f, 0f to -0.3f, 0f to 0.3f).take(points)
+            val union = Mat.zeros(h, w, CvType.CV_8U)
+            val inside = Mat()
+            for ((ox, oy) in offs) {
+                val px = rect.centerX() + ox * rect.width(); val py = rect.centerY() + oy * rect.height()
+                val conf = aiConf(seg, small, px / src.width, py / src.height) ?: continue
+                val bin = Mat(); Imgproc.threshold(conf, bin, 0.5, 255.0, Imgproc.THRESH_BINARY); conf.release()
+                bin.convertTo(bin, CvType.CV_8U)
+                val area = Core.countNonZero(bin)
+                if (area < w * h / 500) { bin.release(); continue }
+                Core.bitwise_and(bin, lim, inside)
+                if (Core.countNonZero(inside) >= area * 0.7) Core.bitwise_or(union, bin, union) // 대부분 사각형 근처면 물체로 인정
+                bin.release()
+            }
+            inside.release()
             lim.release()
-            if (Core.countNonZero(m) < w * h / 400) { m.release(); return null }
-            return m
+            // 사각형과 겹치는 덩어리는 사각형 밖으로 나간 부분(팔, 발 등)까지 통째로 살리고, 떨어진 배경 조각만 버립니다
+            val big = Mat.zeros(h, w, CvType.CV_8U)
+            Imgproc.rectangle(big, org.opencv.core.Point(((rect.left - rect.width() * 0.6f) * sc).toDouble(), ((rect.top - rect.height() * 0.6f) * sc).toDouble()),
+                org.opencv.core.Point(((rect.right + rect.width() * 0.6f) * sc).toDouble(), ((rect.bottom + rect.height() * 0.6f) * sc).toDouble()), Scalar(255.0), -1)
+            Core.bitwise_and(union, big, union); big.release()
+            keepTouching(union, org.opencv.core.Rect((rect.left * sc).toInt(), (rect.top * sc).toInt(), (rect.width() * sc).toInt().coerceAtLeast(1), (rect.height() * sc).toInt().coerceAtLeast(1)))
+            if (Core.countNonZero(union) < w * h / 400) { union.release(); return null }
+            fillHoles(union)
+            Imgproc.GaussianBlur(union, union, Size(0.0, 0.0), 1.2) // 경계만 부드럽게
+            return union
         } finally {
             if (small !== src) small.recycle()
         }
+    }
+
+    /** 가장 큰 덩어리와, 넓이의 30% 이상이 사각형 안에 있는 덩어리만 남깁니다 */
+    private fun keepTouching(m: Mat, r: org.opencv.core.Rect) {
+        val labels = Mat(); val stats = Mat(); val cent = Mat()
+        val n = Imgproc.connectedComponentsWithStats(m, labels, stats, cent)
+        if (n <= 1) { labels.release(); stats.release(); cent.release(); return }
+        var largest = 1
+        for (i in 1 until n) if (stats.get(i, Imgproc.CC_STAT_AREA)[0] > stats.get(largest, Imgproc.CC_STAT_AREA)[0]) largest = i
+        val rr = org.opencv.core.Rect(r.x.coerceIn(0, m.cols() - 1), r.y.coerceIn(0, m.rows() - 1), 1, 1)
+        rr.width = r.width.coerceAtMost(m.cols() - rr.x); rr.height = r.height.coerceAtMost(m.rows() - rr.y)
+        val inRect = labels.submat(rr)
+        val keep = Mat.zeros(m.size(), CvType.CV_8U)
+        val comp = Mat(); val compIn = Mat()
+        for (i in 1 until n) {
+            val area = stats.get(i, Imgproc.CC_STAT_AREA)[0]
+            Core.compare(inRect, Scalar(i.toDouble()), compIn, Core.CMP_EQ)
+            if (i == largest || Core.countNonZero(compIn) >= area * 0.3) {
+                Core.compare(labels, Scalar(i.toDouble()), comp, Core.CMP_EQ)
+                Core.bitwise_or(keep, comp, keep)
+            }
+        }
+        keep.copyTo(m)
+        listOf(labels, stats, cent, keep, comp, compIn).forEach { it.release() }
+    }
+
+    /** 물체 안쪽에 생긴 구멍(물체 넓이의 8% 이하)을 메웁니다 */
+    private fun fillHoles(m: Mat) {
+        val k = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, Size(7.0, 7.0))
+        Imgproc.morphologyEx(m, m, Imgproc.MORPH_CLOSE, k)
+        val contours = ArrayList<org.opencv.core.MatOfPoint>(); val hier = Mat()
+        Imgproc.findContours(m.clone(), contours, hier, Imgproc.RETR_CCOMP, Imgproc.CHAIN_APPROX_SIMPLE)
+        val total = Core.countNonZero(m).toDouble()
+        for (i in contours.indices) {
+            val parent = hier.get(0, i)[3].toInt()
+            if (parent >= 0 && Imgproc.contourArea(contours[i]) <= total * 0.08) Imgproc.drawContours(m, contours, i, Scalar(255.0), -1)
+        }
+        hier.release()
     }
 
     private fun segmenter(ctx: Context): InteractiveSegmenter {
@@ -348,8 +440,7 @@ object Cutout {
     fun photoMask(ctx: Context, src: Bitmap, rect: Rect): Mat {
         val seg = segmenter(ctx)
         try {
-            val r = RectF(rect)
-            val m = aiMask(seg, src, r, r.centerX(), r.centerY(), 1024) ?: return grabCutMask(src, rect)
+            val m = aiMask(seg, src, RectF(rect), 1024, 7) ?: return grabCutMask(src, rect)
             val full = Mat(); Imgproc.resize(m, full, Size(src.width.toDouble(), src.height.toDouble()), 0.0, 0.0, Imgproc.INTER_LINEAR)
             m.release()
             return full
@@ -359,29 +450,32 @@ object Cutout {
     }
 
     /**
-     * 동영상: 프레임마다 AI 로 물체를 다시 찾습니다. 가리키는 점과 범위는 앞 프레임에서 찾은 물체의 중심·크기를 따라가고,
-     * 결과는 앞 프레임과 섞어서 경계가 떨리지 않게 합니다.
+     * 동영상: 프레임마다 AI 로 물체를 다시 찾습니다 (3개 점).
+     * 범위는 앞 프레임 물체의 중심을 따라가되 처음 사각형보다 작아지지 않게 해서, 조금씩 깎여 나가던 문제를 막습니다.
+     * 갑자기 물체가 30% 넘게 줄면 그 프레임만 놓친 것으로 보고 앞 프레임 모양을 합칩니다.
      */
     class VideoTracker(ctx: Context, rect: Rect, private val w0: Int, private val h0: Int) {
         private val seg = segmenter(ctx)
+        private val r0 = RectF(rect)
         private var area = RectF(rect)
         private var prev: Mat? = null
 
         fun next(frame: Bitmap): Mat {
             val rx = frame.width.toFloat() / w0; val ry = frame.height.toFloat() / h0
             val r = RectF(area.left * rx, area.top * ry, area.right * rx, area.bottom * ry)
-            var m = aiMask(seg, frame, r, r.centerX(), r.centerY(), 512)
-            if (m == null) m = prev?.clone() ?: Mat.zeros(1, 1, CvType.CV_8U)
+            var m = aiMask(seg, frame, r, 512, 3)
             val p = prev
-            if (p != null && p.size() == m.size()) Core.addWeighted(m, 0.6, p, 0.4, 0.0, m) // 앞 프레임과 섞기
+            if (m == null) m = p?.clone() ?: Mat.zeros(1, 1, CvType.CV_8U)
+            else if (p != null && p.size() == m.size() && Core.countNonZero(m) < Core.countNonZero(p) * 0.7) Core.max(m, p, m)
             prev?.release(); prev = m.clone()
-            // 다음 프레임: 물체 중심과 크기를 따라감
+            // 다음 프레임 범위: 물체 중심을 따라가고, 크기는 max(물체 크기, 처음 사각형)
             val bin = Mat(); Imgproc.threshold(m, bin, 127.0, 255.0, Imgproc.THRESH_BINARY)
-            val box = Imgproc.boundingRect(bin)
-            bin.release()
+            val box = Imgproc.boundingRect(bin); bin.release()
             if (box.width > 4 && box.height > 4 && m.cols() > 1) {
                 val sx = w0.toFloat() / m.cols(); val sy = h0.toFloat() / m.rows()
-                area = RectF(box.x * sx, box.y * sy, (box.x + box.width) * sx, (box.y + box.height) * sy)
+                val cx = (box.x + box.width / 2f) * sx; val cy = (box.y + box.height / 2f) * sy
+                val hw = max(box.width * sx, r0.width()) / 2; val hh = max(box.height * sy, r0.height()) / 2
+                area = RectF(cx - hw, cy - hh, cx + hw, cy + hh)
             }
             val full = Mat()
             if (m.cols() > 1) Imgproc.resize(m, full, Size(frame.width.toDouble(), frame.height.toDouble()), 0.0, 0.0, Imgproc.INTER_LINEAR)
@@ -503,5 +597,96 @@ class RectSelectView(ctx: Context) : View(ctx) {
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> drag = -1
         }
         return true
+    }
+}
+
+/**
+ * 배경 제거 결과를 손으로 고치는 화면. "복원" 붓으로 문지르면 지워진 곳이 되살아나고, "지우기" 붓으로 남은 배경을 지웁니다.
+ * mask: 사진과 같은 크기의 ALPHA_8 비트맵 (255 = 남김)
+ */
+class MaskEditView(ctx: Context, private val src: Bitmap, val mask: Bitmap, private val checker: BitmapDrawable) : View(ctx) {
+    var restore = true
+    var brushDp = 24f
+    private var backdrop = Backdrop.TRANSPARENT
+    private var blurred: Bitmap? = null
+    private val d = resources.displayMetrics.density
+    private val dstIn = Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN); isFilterBitmap = true }
+    private val paintOn = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+    private val paintOff = Paint(Paint.ANTI_ALIAS_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR); style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+    private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2 * d; color = Color.rgb(0, 210, 255) }
+    private var lastX = 0f; private var lastY = 0f
+    private var touchX = -1f; private var touchY = -1f
+
+    fun setBackdrop(b: Backdrop) {
+        backdrop = b
+        if (b == Backdrop.BLUR && blurred == null) {
+            val m = Mat(); Utils.bitmapToMat(src, m)
+            Imgproc.GaussianBlur(m, m, Size(0.0, 0.0), max(src.width, src.height) / 50.0)
+            blurred = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888).also { Utils.matToBitmap(m, it) }
+            m.release()
+        }
+        invalidate()
+    }
+
+    private fun dst(): RectF {
+        val s = min(width / src.width.toFloat(), height / src.height.toFloat())
+        val ox = (width - src.width * s) / 2; val oy = (height - src.height * s) / 2
+        return RectF(ox, oy, ox + src.width * s, oy + src.height * s)
+    }
+
+    override fun onDraw(c: Canvas) {
+        val r = dst()
+        when (backdrop) {
+            Backdrop.TRANSPARENT -> { checker.setBounds(r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt()); checker.draw(c) }
+            Backdrop.WHITE -> c.drawRect(r, Paint().apply { color = Color.WHITE })
+            Backdrop.BLACK -> c.drawRect(r, Paint().apply { color = Color.BLACK })
+            Backdrop.GREEN -> c.drawRect(r, Paint().apply { color = Color.rgb(0, 177, 64) })
+            Backdrop.BLUR -> blurred?.let { c.drawBitmap(it, null, r, null) }
+        }
+        val layer = c.saveLayer(r, null)
+        c.drawBitmap(src, null, r, Paint(Paint.FILTER_BITMAP_FLAG))
+        c.drawBitmap(mask, null, r, dstIn) // 마스크(알파)가 있는 곳만 남김
+        c.restoreToCount(layer)
+        if (touchX >= 0) c.drawCircle(touchX, touchY, brushDp * d, ring)
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        val r = dst()
+        val s = r.width() / src.width
+        val ix = (e.x - r.left) / s; val iy = (e.y - r.top) / s
+        val p = if (restore) paintOn else paintOff
+        p.strokeWidth = brushDp * d * 2 / s
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { lastX = ix; lastY = iy; Canvas(mask).drawPoint(ix, iy, p) }
+            MotionEvent.ACTION_MOVE -> { Canvas(mask).drawLine(lastX, lastY, ix, iy, p); lastX = ix; lastY = iy }
+        }
+        touchX = if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) -1f else e.x
+        touchY = e.y
+        invalidate()
+        return true
+    }
+
+    companion object {
+        /** 0~255 Mat → ALPHA_8 비트맵 (줄 끝 여백 고려). Mat 은 해제합니다. */
+        fun maskToBitmap(m: Mat): Bitmap {
+            val w = m.cols(); val h = m.rows()
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
+            val row = ByteArray(w); val stride = bmp.rowBytes
+            val buf = java.nio.ByteBuffer.allocate(stride * h)
+            for (y in 0 until h) { m.get(y, 0, row); buf.position(y * stride); buf.put(row) }
+            buf.position(0); bmp.copyPixelsFromBuffer(buf)
+            m.release()
+            return bmp
+        }
+
+        /** ALPHA_8 비트맵 → 0~255 Mat */
+        fun bitmapToMask(b: Bitmap): Mat {
+            val w = b.width; val h = b.height; val stride = b.rowBytes
+            val buf = java.nio.ByteBuffer.allocate(stride * h)
+            b.copyPixelsToBuffer(buf)
+            val m = Mat(h, w, CvType.CV_8U); val row = ByteArray(w)
+            for (y in 0 until h) { buf.position(y * stride); buf.get(row); m.put(y, 0, row) }
+            return m
+        }
     }
 }

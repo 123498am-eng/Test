@@ -490,7 +490,6 @@ class WarpRenderer : GLSurfaceView.Renderer {
     @Volatile var onTargetTone: ((FloatArray) -> Unit)? = null
     private var drvTex = 0
     private var drvShown: DriverState? = null
-    private var innerCount = 0 // 고정 점 중 앞쪽 innerCount 개는 "머리 둘레 고리": 고개와 함께 움직임
     private val pendingTarget = AtomicReference<Pair<TargetFrame, Boolean>?>()
     private var cur: TargetFrame? = null
     private var curKeep = false
@@ -498,7 +497,7 @@ class WarpRenderer : GLSurfaceView.Renderer {
     // 메시 (첫 얼굴 프레임에서 한 번 만듦)
     private var tris: ShortBuffer? = null
     private var triCount = 0
-    private var fixedPts: FloatArray? = null // 고리 + 테두리 점 (사진 좌표)
+    private var fixedPts: FloatArray? = null // 테두리 점 (사진 좌표)
     private var identity: FloatArray? = null // 대상 얼굴의 평소 모양 (얼굴 좌표)
     private var identitySum: FloatArray? = null
     private var identityN = 0
@@ -539,33 +538,47 @@ class WarpRenderer : GLSurfaceView.Renderer {
 
     override fun onSurfaceChanged(g: GL10?, w: Int, h: Int) { vw = w; vh = h; GLES20.glViewport(0, 0, w, h) }
 
+    // ----- 메시 구성 -----
+    // 점 순서: 얼굴 478점 → 머리 둘레 고리 RING점 → 사진 테두리 점
+    private val RING = 24
+    private var ringNear = IntArray(0)       // 고리 점마다 가장 가까운 얼굴 윤곽점
+    private var triIdx = IntArray(0)         // 삼각형 꼭짓점 번호
+    private var faceTri = BooleanArray(0)    // 세 꼭짓점이 모두 얼굴 점인 삼각형
+    private var safeK = 1f                   // 지난 프레임에 쓴 움직임 비율 (갑자기 커지지 않게)
+
+    /** 얼굴 윤곽 (MediaPipe FACE_OVAL) */
+    private val OVAL = intArrayOf(10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377,
+        152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109)
+
+    /** 머리 둘레 고리의 기본 위치: 지금 프레임의 얼굴을 기준으로 잡고 사진 안쪽에 둡니다 (사진 밖으로 나간 점이 테두리에 붙어 찢어지던 문제 해결) */
+    private fun ringRest(base: FloatArray, w: Float, h: Float, out: FloatArray, o: Int) {
+        var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+        for (i in 0 until 468) { val x = base[i * 3]; val y = -base[i * 3 + 1]; minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y) }
+        val cx = (minX + maxX) / 2; val cy = (minY + maxY) / 2; val fw = maxX - minX; val fh = maxY - minY
+        val m = 0.03f * min(w, h)
+        for (k in 0 until RING) {
+            val a = (k * 2 * Math.PI / RING).toFloat()
+            out[o + k * 2] = (cx + fw * 0.75f * cos(a)).coerceIn(m, w - 1 - m)
+            out[o + k * 2 + 1] = (cy - fh * 0.06f + fh * 0.74f * sin(a)).coerceIn(m, h - 1 - m)
+        }
+    }
+
     /** 첫 얼굴 프레임에서 들로네 삼각분할 (입 안쪽은 비워 둠) */
     private fun buildMesh(t: TargetFrame) {
         val base = t.base!!
         val w = t.bitmap.width.toFloat(); val h = t.bitmap.height.toFloat()
         meshW = t.bitmap.width; meshH = t.bitmap.height
-        val pts = ArrayList<FloatArray>()
-        for (i in 0 until PTS) pts += floatArrayOf(base[i * 3], -base[i * 3 + 1])
-        var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
-        for (i in 0 until 468) { minX = min(minX, pts[i][0]); maxX = max(maxX, pts[i][0]); minY = min(minY, pts[i][1]); maxY = max(maxY, pts[i][1]) }
-        val cx = (minX + maxX) / 2; val cy = (minY + maxY) / 2
-        val fixed = ArrayList<FloatArray>()
-        // 1) 머리 둘레 고리: 머리카락·귀까지 감싸며 고개와 함께 움직임 (얼굴만 움직이고 머리카락은 그대로인 어색함을 줄임)
-        val ix = (maxX - minX) * 0.82f; val iy = (maxY - minY) * 0.80f
-        for (k in 0 until 24) {
-            val a = (k * 2 * Math.PI / 24).toFloat()
-            fixed += floatArrayOf((cx + ix * cos(a)).coerceIn(0f, w - 1), (cy - (maxY - minY) * 0.08f + iy * sin(a)).coerceIn(0f, h - 1))
+        val border = ArrayList<FloatArray>()
+        for (k in 0..6) { val f = k / 6f; border += floatArrayOf(f * (w - 1), 0f); border += floatArrayOf(f * (w - 1), h - 1) }
+        for (k in 1..5) { val f = k / 6f; border += floatArrayOf(0f, f * (h - 1)); border += floatArrayOf(w - 1, f * (h - 1)) }
+        val ring = FloatArray(RING * 2); ringRest(base, w, h, ring, 0)
+        val all = ArrayList<FloatArray>()
+        for (i in 0 until PTS) all += floatArrayOf(base[i * 3], -base[i * 3 + 1])
+        for (k in 0 until RING) all += floatArrayOf(ring[k * 2], ring[k * 2 + 1])
+        all += border
+        ringNear = IntArray(RING) { k ->
+            OVAL.minBy { i -> val dx = base[i * 3] - ring[k * 2]; val dy = -base[i * 3 + 1] - ring[k * 2 + 1]; dx * dx + dy * dy }
         }
-        innerCount = fixed.size
-        // 2) 바깥 고리: 움직이지 않음 (배경은 그대로)
-        val ox = (maxX - minX) * 1.6f; val oy = (maxY - minY) * 1.45f
-        for (k in 0 until 28) {
-            val a = (k * 2 * Math.PI / 28).toFloat()
-            fixed += floatArrayOf((cx + ox * cos(a)).coerceIn(0f, w - 1), (cy + oy * sin(a)).coerceIn(0f, h - 1))
-        }
-        for (k in 0..4) { val f = k / 4f; fixed += floatArrayOf(f * (w - 1), 0f); fixed += floatArrayOf(f * (w - 1), h - 1) }
-        for (k in 1..3) { val f = k / 4f; fixed += floatArrayOf(0f, f * (h - 1)); fixed += floatArrayOf(w - 1, f * (h - 1)) }
-        val all = pts + fixed
         val sub = Subdiv2D(org.opencv.core.Rect(-2, -2, meshW + 4, meshH + 4))
         val index = HashMap<Long, Int>()
         fun key(x: Float, y: Float) = ((x * 16).toLong() shl 32) xor ((y * 16).toLong() and 0xffffffffL)
@@ -576,18 +589,41 @@ class WarpRenderer : GLSurfaceView.Renderer {
         val list = MatOfFloat6(); sub.getTriangleList(list)
         val arr = list.toArray()
         val mouth = INNER_LIP.toHashSet()
-        val out = ArrayList<Short>()
+        val out = ArrayList<Int>()
         for (j in arr.indices step 6) {
             val a = index[key(arr[j].toFloat(), arr[j + 1].toFloat())] ?: continue
             val b = index[key(arr[j + 2].toFloat(), arr[j + 3].toFloat())] ?: continue
             val c = index[key(arr[j + 4].toFloat(), arr[j + 5].toFloat())] ?: continue
-            if (a in mouth && b in mouth && c in mouth) continue // 입 안쪽은 비움 (입을 벌리면 어두운 입속이 보이게)
-            out += a.toShort(); out += b.toShort(); out += c.toShort()
+            if (a in mouth && b in mouth && c in mouth) continue // 입 안쪽은 비움
+            out += a; out += b; out += c
         }
-        tris = ByteBuffer.allocateDirect(out.size * 2).order(ByteOrder.nativeOrder()).asShortBuffer().apply { put(out.toShortArray()); position(0) }
+        triIdx = out.toIntArray()
+        faceTri = BooleanArray(triIdx.size / 3) { k -> triIdx[k * 3] < PTS && triIdx[k * 3 + 1] < PTS && triIdx[k * 3 + 2] < PTS }
+        tris = ByteBuffer.allocateDirect(out.size * 2).order(ByteOrder.nativeOrder()).asShortBuffer().apply { put(ShortArray(out.size) { out[it].toShort() }); position(0) }
         triCount = out.size
-        fixedPts = FloatArray(fixed.size * 2).also { fp -> fixed.forEachIndexed { i, p -> fp[i * 2] = p[0]; fp[i * 2 + 1] = p[1] } }
-        identity = null; identitySum = null; identityN = 0
+        fixedPts = FloatArray(border.size * 2).also { fp -> border.forEachIndexed { i, p -> fp[i * 2] = p[0]; fp[i * 2 + 1] = p[1] } }
+        identity = null; identitySum = null; identityN = 0; safeK = 1f
+    }
+
+    private fun signedAreas(p: FloatArray, out: FloatArray) {
+        for (k in out.indices) {
+            val a = triIdx[k * 3] * 2; val b = triIdx[k * 3 + 1] * 2; val c = triIdx[k * 3 + 2] * 2
+            out[k] = (p[b] - p[a]) * (p[c + 1] - p[a + 1]) - (p[b + 1] - p[a + 1]) * (p[c] - p[a])
+        }
+    }
+
+    /** 회전 각도에 k 를 곱한 회전 (k=0: 회전 없음) */
+    private fun scaleRot(r: FloatArray, k: Float): FloatArray {
+        val cosT = ((r[0] + r[4] + r[8] - 1f) / 2f).coerceIn(-1f, 1f)
+        val t = acos(cosT)
+        if (t < 1e-4f || k >= 0.999f) return if (k >= 0.999f) r else floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
+        var ax = r[7] - r[5]; var ay = r[2] - r[6]; var az = r[3] - r[1]
+        val l = sqrt(ax * ax + ay * ay + az * az).coerceAtLeast(1e-6f); ax /= l; ay /= l; az /= l
+        val a = t * k; val c = cos(a); val s = sin(a); val v = 1 - c
+        return floatArrayOf(
+            c + ax * ax * v, ax * ay * v - az * s, ax * az * v + ay * s,
+            ay * ax * v + az * s, c + ay * ay * v, ay * az * v - ax * s,
+            az * ax * v - ay * s, az * ay * v + ax * s, c + az * az * v)
     }
 
     override fun onDrawFrame(g: GL10?) {
@@ -648,38 +684,87 @@ class WarpRenderer : GLSurfaceView.Renderer {
 
         // 얼굴 점 옮기기: 대상 평소 모양 + 내 표정 변화 → 내 고개 회전 → 대상 사진 좌표
         val d = driver.get()
-        val n = PTS; val nFixed = fixed.size / 2
-        val pos = FloatArray((n + nFixed) * 3); val uv = FloatArray((n + nFixed) * 2)
-        // 깊이: 카메라에 가까운 면이 앞에 오도록 (메시가 접혀도 겹쳐 보이지 않게)
-        fun depth(pz: Float) = (-(pz - fr.c[2]) / (fr.faceH * 2f)).coerceIn(-0.6f, 0.6f)
-        val tmp = FloatArray(3)
-        val gk = gain
-        for (i in 0 until n) {
-            var fx = idn[i * 3]; var fy = idn[i * 3 + 1]; var fz = idn[i * 3 + 2]
-            if (d != null) { fx += d.delta[i * 3] * gk; fy += d.delta[i * 3 + 1] * gk; fz += d.delta[i * 3 + 2] * gk }
-            fr.toImage(fx, fy, fz, tmp, 0)
-            var px = tmp[0]; var py = tmp[1]; var pz = tmp[2]
-            if (d != null) {
-                val r = d.rot
-                val ox = px - fr.c[0]; val oy = py - fr.c[1]; val oz = pz - fr.c[2]
-                px = fr.c[0] + r[0] * ox + r[1] * oy + r[2] * oz + d.tx * fr.faceH * 0.8f
-                py = fr.c[1] + r[3] * ox + r[4] * oy + r[5] * oz + d.ty * fr.faceH * 0.8f
-            }
-            pos[i * 3] = nx(px); pos[i * 3 + 1] = ny(-py); pos[i * 3 + 2] = depth(pz)
-            uv[i * 2] = base[i * 3] / iw; uv[i * 2 + 1] = -base[i * 3 + 1] / ih
+        val n = PTS; val nB = fixed.size / 2; val nAll = n + RING + nB
+        // 이번 프레임의 기본 위치(사진 픽셀): 얼굴 = 대상 얼굴 점, 고리 = 지금 얼굴 기준, 테두리 = 고정
+        val rest = FloatArray(nAll * 2)
+        for (i in 0 until n) { rest[i * 2] = base[i * 3]; rest[i * 2 + 1] = -base[i * 3 + 1] }
+        ringRest(base, iw, ih, rest, n * 2)
+        for (j in 0 until nB) { rest[(n + RING + j) * 2] = fixed[j * 2]; rest[(n + RING + j) * 2 + 1] = fixed[j * 2 + 1] }
+        val nT = triIdx.size / 3
+        val s0 = FloatArray(nT); signedAreas(rest, s0)
+
+        // 눈동자: 눈 폭의 25% 이상은 움직이지 않게 (눈꺼풀 밖으로 나가 눈동자가 겹치던 문제 방지)
+        val eyeW = run {
+            fun dist(a: Int, b: Int) = sqrt((idn[a * 3] - idn[b * 3]).let { it * it } + (idn[a * 3 + 1] - idn[b * 3 + 1]).let { it * it })
+            (dist(33, 133) + dist(362, 263)) / 2
         }
-        for (j in 0 until nFixed) {
-            val x = fixed[j * 2]; val y = fixed[j * 2 + 1]
-            var px = x; var py = y
-            if (j < innerCount && d != null) {
-                // 머리 둘레 고리: 얼굴 중심 평면에서 고개 회전·이동을 그대로 적용
-                val r = d.rot
-                val ox = x - fr.c[0]; val oy = -y - fr.c[1]
-                px = fr.c[0] + r[0] * ox + r[1] * oy + d.tx * fr.faceH * 0.8f
-                py = -(fr.c[1] + r[3] * ox + r[4] * oy + d.ty * fr.faceH * 0.8f)
+        val gk = gain
+        val dl = FloatArray(n * 3)
+        if (d != null) for (i in 0 until n) {
+            dl[i * 3] = d.delta[i * 3] * gk; dl[i * 3 + 1] = d.delta[i * 3 + 1] * gk; dl[i * 3 + 2] = d.delta[i * 3 + 2] * gk
+            if (i >= 468) {
+                val len = sqrt(dl[i * 3] * dl[i * 3] + dl[i * 3 + 1] * dl[i * 3 + 1])
+                val lim = eyeW * 0.25f
+                if (len > lim) { val f = lim / len; dl[i * 3] *= f; dl[i * 3 + 1] *= f }
             }
-            pos[(n + j) * 3] = nx(px); pos[(n + j) * 3 + 1] = ny(py); pos[(n + j) * 3 + 2] = if (j < innerCount) 0.7f else 0.9f
-            uv[(n + j) * 2] = x / iw; uv[(n + j) * 2 + 1] = y / ih
+        }
+
+        val cand = FloatArray(nAll * 2); val candZ = FloatArray(n); val sA = FloatArray(nT)
+        val tmp = FloatArray(3)
+        /** kh: 고개 움직임 비율, ke: 표정 비율, kr: 고리가 얼굴 윤곽을 따라가는 비율 */
+        fun deform(kh: Float, ke: Float, kr: Float) {
+            val r = if (d != null) scaleRot(d.rot, kh) else null
+            for (i in 0 until n) {
+                fr.toImage(idn[i * 3] + dl[i * 3] * ke, idn[i * 3 + 1] + dl[i * 3 + 1] * ke, idn[i * 3 + 2] + dl[i * 3 + 2] * ke, tmp, 0)
+                var px = tmp[0]; var py = tmp[1]; var pz = tmp[2]
+                if (r != null && d != null) {
+                    val ox = px - fr.c[0]; val oy = py - fr.c[1]; val oz = pz - fr.c[2]
+                    px = fr.c[0] + r[0] * ox + r[1] * oy + r[2] * oz + d.tx * kh * fr.faceH * 0.8f
+                    py = fr.c[1] + r[3] * ox + r[4] * oy + r[5] * oz + d.ty * kh * fr.faceH * 0.8f
+                    pz = fr.c[2] + r[6] * ox + r[7] * oy + r[8] * oz
+                }
+                cand[i * 2] = px; cand[i * 2 + 1] = -py; candZ[i] = pz
+            }
+            for (k in 0 until RING) {
+                val ni = ringNear[k]
+                cand[(n + k) * 2] = rest[(n + k) * 2] + (cand[ni * 2] - rest[ni * 2]) * kr
+                cand[(n + k) * 2 + 1] = rest[(n + k) * 2 + 1] + (cand[ni * 2 + 1] - rest[ni * 2 + 1]) * kr
+            }
+            for (j in (n + RING) * 2 until nAll * 2) cand[j] = rest[j]
+        }
+        /** 겹침 검사: 얼굴 밖 삼각형이 하나라도 뒤집히거나, 사진에 없는 쪽을 억지로 펼친(3배 넘게 늘어난) 얼굴 삼각형이 1%를 넘으면 실패 */
+        fun ok(): Boolean {
+            signedAreas(cand, sA)
+            var stretch = 0; var nFace = 0
+            for (k in 0 until nT) {
+                val same = (sA[k] > 0) == (s0[k] > 0)
+                if (!faceTri[k]) { if (!same) return false }
+                else { nFace++; if (same && abs(sA[k]) > 3f * abs(s0[k]) && abs(sA[k]) > 40f) stretch++ }
+            }
+            return stretch <= nFace / 100
+        }
+        fun search(kh: Float, ke: Float): Boolean {
+            for (kr in floatArrayOf(0.85f, 0.6f, 0.35f, 0.1f)) { deform(kh, ke, kr); if (ok()) return true }
+            return false
+        }
+        // 가장 큰 움직임부터 줄여 가며, 겹치지 않는 범위를 찾습니다 (커질 때는 천천히)
+        val maxK = min(1f, safeK + 0.12f)
+        var found = -1f
+        var k = maxK
+        while (k >= -0.001f) { if (search(max(k, 0f), 1f)) { found = max(k, 0f); break }; k -= 0.1f }
+        if (found < 0f) {
+            if (!search(0f, 0.5f) && !search(0f, 0f)) { deform(0f, 0f, 0f); for (j in 0 until nAll * 2) cand[j] = rest[j] }
+            found = 0f
+        }
+        safeK = found
+
+        val pos = FloatArray(nAll * 3); val uv = FloatArray(nAll * 2)
+        // 깊이: 카메라에 가까운 면이 앞에 오도록 (돌아간 뒷면은 가려짐)
+        fun depth(pz: Float) = (-(pz - fr.c[2]) / (fr.faceH * 2f)).coerceIn(-0.6f, 0.6f)
+        for (i in 0 until nAll) {
+            pos[i * 3] = nx(cand[i * 2]); pos[i * 3 + 1] = ny(cand[i * 2 + 1])
+            pos[i * 3 + 2] = when { i < n -> depth(candZ[i]); i < n + RING -> 0.7f; else -> 0.9f }
+            uv[i * 2] = rest[i * 2] / iw; uv[i * 2 + 1] = rest[i * 2 + 1] / ih
         }
         val pb = fill(posBuf, pos).also { posBuf = it }
         val ub = fill(uvBuf, uv).also { uvBuf = it }
