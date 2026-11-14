@@ -40,9 +40,12 @@ class Subdivision(val tris: IntArray, private val rowStart: IntArray, private va
 
     companion object {
         const val BASE = 468
-        @Volatile private var cached: Subdivision? = null
+        private val cache = HashMap<Int, Subdivision>()
 
-        fun get(ctx: Context, levels: Int = 2): Subdivision = cached ?: build(FaceMesh.triangles(ctx), BASE, levels).also { cached = it }
+        /** levels 2: 삼각형 14,368개 (기본), 3: 57,472개 (자세히 보기) */
+        fun get(ctx: Context, levels: Int = 2): Subdivision = synchronized(cache) {
+            cache.getOrPut(levels) { build(FaceMesh.triangles(ctx), BASE, levels) }
+        }
 
         fun build(baseTris: IntArray, baseCount: Int, levels: Int): Subdivision {
             var tris = baseTris
@@ -120,6 +123,45 @@ class Subdivision(val tris: IntArray, private val rowStart: IntArray, private va
 /** 렌더링·내보내기용 메시. 좌표는 얼굴 정면 기준으로 맞추고 대략 [-1, 1] 크기입니다. */
 class MeshData(val pos: FloatArray, val uv: FloatArray, val normal: FloatArray, val tris: IntArray, val texture: Bitmap?) {
     val count get() = pos.size / 3
+
+    /** 주름·피부 결 맵 (R,G: 굴곡 기울기, B: 높이). 자세히 보기에서만 만듭니다. */
+    @Volatile var detail: Bitmap? = null
+
+    /** 노멀 맵용 접선(u 방향)과 종접선(v 방향). */
+    val tangents: Pair<FloatArray, FloatArray> by lazy { computeTangents() }
+
+    private fun computeTangents(): Pair<FloatArray, FloatArray> {
+        val t = FloatArray(pos.size); val b = FloatArray(pos.size)
+        for (k in tris.indices step 3) {
+            val i0 = tris[k]; val i1 = tris[k + 1]; val i2 = tris[k + 2]
+            val e1x = pos[i1 * 3] - pos[i0 * 3]; val e1y = pos[i1 * 3 + 1] - pos[i0 * 3 + 1]; val e1z = pos[i1 * 3 + 2] - pos[i0 * 3 + 2]
+            val e2x = pos[i2 * 3] - pos[i0 * 3]; val e2y = pos[i2 * 3 + 1] - pos[i0 * 3 + 1]; val e2z = pos[i2 * 3 + 2] - pos[i0 * 3 + 2]
+            val du1 = uv[i1 * 2] - uv[i0 * 2]; val dv1 = uv[i1 * 2 + 1] - uv[i0 * 2 + 1]
+            val du2 = uv[i2 * 2] - uv[i0 * 2]; val dv2 = uv[i2 * 2 + 1] - uv[i0 * 2 + 1]
+            val det = du1 * dv2 - du2 * dv1
+            if (kotlin.math.abs(det) < 1e-12f) continue
+            val r = 1f / det
+            val tx = (e1x * dv2 - e2x * dv1) * r; val ty = (e1y * dv2 - e2y * dv1) * r; val tz = (e1z * dv2 - e2z * dv1) * r
+            val bx = (e2x * du1 - e1x * du2) * r; val by = (e2y * du1 - e1y * du2) * r; val bz = (e2z * du1 - e1z * du2) * r
+            for (i in intArrayOf(i0, i1, i2)) {
+                t[i * 3] += tx; t[i * 3 + 1] += ty; t[i * 3 + 2] += tz
+                b[i * 3] += bx; b[i * 3 + 1] += by; b[i * 3 + 2] += bz
+            }
+        }
+        for (i in 0 until count) {
+            // 법선에 수직이 되도록 정리
+            val nx = normal[i * 3]; val ny = normal[i * 3 + 1]; val nz = normal[i * 3 + 2]
+            var d = t[i * 3] * nx + t[i * 3 + 1] * ny + t[i * 3 + 2] * nz
+            var x = t[i * 3] - nx * d; var y = t[i * 3 + 1] - ny * d; var z = t[i * 3 + 2] - nz * d
+            var l = sqrt(x * x + y * y + z * z).coerceAtLeast(1e-9f)
+            t[i * 3] = x / l; t[i * 3 + 1] = y / l; t[i * 3 + 2] = z / l
+            d = b[i * 3] * nx + b[i * 3 + 1] * ny + b[i * 3 + 2] * nz
+            x = b[i * 3] - nx * d; y = b[i * 3 + 1] - ny * d; z = b[i * 3 + 2] - nz * d
+            l = sqrt(x * x + y * y + z * z).coerceAtLeast(1e-9f)
+            b[i * 3] = x / l; b[i * 3 + 1] = y / l; b[i * 3 + 2] = z / l
+        }
+        return t to b
+    }
 
     companion object {
         /**
@@ -255,12 +297,19 @@ class MeshGL {
         const val MODE_TEXTURE = 0
         const val MODE_SHADED = 1
         const val MODE_WIRE = 2
+        const val MODE_PHOTO_ONLY = 4
         private const val MODE_BACKGROUND = 3
     }
 
     private var prog = 0
     var tex = 0; private set
     private var posBuf: FloatBuffer? = null; private var uvBuf: FloatBuffer? = null; private var norBuf: FloatBuffer? = null
+    private var tanBuf: FloatBuffer? = null; private var bitBuf: FloatBuffer? = null
+    private var detTex = 0
+    /** 주름 강도 (0 = 끔). 자세히 보기 맵이 있을 때만 적용됩니다. */
+    @Volatile var detailStrength = 0.6f
+    /** 조명 방향 (화면 기준, 오른쪽 x, 위 y, 앞 z) */
+    @Volatile var light = floatArrayOf(0.35f, 0.45f, 1f)
     private var triBuf: ShortBuffer? = null; private var lineBuf: ShortBuffer? = null
     private var triCount = 0; private var lineCount = 0
     private var trisRef: IntArray? = null
@@ -276,27 +325,45 @@ class MeshGL {
 
     private val vs = """
         uniform mat4 uMVP; uniform mat4 uModel;
-        attribute vec3 aPos; attribute vec2 aUV; attribute vec3 aNor;
-        varying vec2 vUV; varying vec3 vNor;
-        void main() { vUV = aUV; vNor = mat3(uModel) * aNor; gl_Position = uMVP * vec4(aPos, 1.0); }
-    """
-    private val fs = """
-        precision mediump float;
-        uniform sampler2D uTex; uniform int uMode;
-        varying vec2 vUV; varying vec3 vNor;
+        attribute vec3 aPos; attribute vec2 aUV; attribute vec3 aNor; attribute vec3 aTan; attribute vec3 aBit;
+        varying vec2 vUV; varying vec3 vNor; varying vec3 vTan; varying vec3 vBit;
         void main() {
-            if (uMode == 3) { gl_FragColor = vec4(texture2D(uTex, vUV).rgb, 1.0); return; }
+            mat3 m = mat3(uModel);
+            vUV = aUV; vNor = m * aNor; vTan = m * aTan; vBit = m * aBit;
+            gl_Position = uMVP * vec4(aPos, 1.0);
+        }
+    """
+    // uMode 0: 사진, 1: 점토(굴곡만), 2: 선, 3: 배경, 4: 사진만(조명·주름 없이)
+    private val fs = """
+        precision highp float;
+        uniform sampler2D uTex; uniform sampler2D uDet; uniform int uMode; uniform int uHasDet;
+        uniform float uDetail; uniform vec3 uLight;
+        varying vec2 vUV; varying vec3 vNor; varying vec3 vTan; varying vec3 vBit;
+        void main() {
+            if (uMode == 3 || uMode == 4) { gl_FragColor = vec4(texture2D(uTex, vUV).rgb, 1.0); return; }
             if (uMode == 2) { gl_FragColor = vec4(0.25, 0.95, 0.75, 1.0); return; }
             vec3 n = normalize(vNor);
             float back = 1.0;
             if (!gl_FrontFacing) { n = -n; back = 0.45; }
-            vec3 L = normalize(vec3(0.35, 0.45, 1.0));
+            float cav = 0.0;
+            if (uHasDet == 1 && uDetail > 0.0) {
+                // 노멀 맵: 사진에서 뽑은 주름·피부 결을 표면 굴곡으로
+                vec4 dm = texture2D(uDet, vUV);
+                vec2 g = dm.rg * 2.0 - 1.0;
+                vec3 nt = normalize(vec3(-g.x * uDetail * 2.5, -g.y * uDetail * 2.5, 1.0));
+                vec3 T = normalize(vTan - n * dot(n, vTan));
+                vec3 B = normalize(vBit - n * dot(n, vBit) - T * dot(T, vBit));
+                n = normalize(T * nt.x + B * nt.y + n * nt.z);
+                cav = clamp((0.5 - dm.b) * 2.0, 0.0, 1.0) * uDetail; // 홈은 조금 더 어둡게
+            }
+            vec3 L = normalize(uLight);
             vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
             float d = max(dot(n, L), 0.0);
             float s = pow(max(dot(n, H), 0.0), 40.0);
+            float ao = 1.0 - 0.35 * cav;
             vec3 base = uMode == 0 ? texture2D(uTex, vUV).rgb : vec3(0.87, 0.79, 0.73);
-            vec3 c = uMode == 0 ? base * (0.62 + 0.48 * d) + vec3(0.10 * s)
-                                : base * (0.22 + 0.80 * d) + vec3(0.25 * s);
+            vec3 c = uMode == 0 ? base * (0.62 + 0.48 * d) * ao + vec3(0.10 * s)
+                                : base * (0.22 + 0.80 * d) * ao + vec3(0.25 * s);
             gl_FragColor = vec4(c * back, 1.0);
         }
     """
@@ -310,12 +377,24 @@ class MeshGL {
         GLES20.glAttachShader(prog, shader(GLES20.GL_VERTEX_SHADER, vs))
         GLES20.glAttachShader(prog, shader(GLES20.GL_FRAGMENT_SHADER, fs))
         GLES20.glLinkProgram(prog)
-        val ids = IntArray(1); GLES20.glGenTextures(1, ids, 0); tex = ids[0]
-        trisRef = null; posBuf = null; uvBuf = null; norBuf = null
+        val ids = IntArray(2); GLES20.glGenTextures(2, ids, 0); tex = ids[0]; detTex = ids[1]
+        trisRef = null; posBuf = null; uvBuf = null; norBuf = null; tanBuf = null; bitBuf = null
+        hasDetail = false
+    }
+
+    private var hasDetail = false
+
+    /** 주름 맵을 올립니다 (자세히 보기). */
+    fun uploadDetail(bmp: Bitmap) {
+        val keep = tex
+        tex = detTex
+        uploadTexture(bmp)
+        tex = keep
+        hasDetail = true
     }
 
     fun release() {
-        if (tex != 0) GLES20.glDeleteTextures(1, intArrayOf(tex), 0)
+        if (tex != 0) GLES20.glDeleteTextures(2, intArrayOf(tex, detTex), 0)
         if (prog != 0) GLES20.glDeleteProgram(prog)
         tex = 0; prog = 0
     }
@@ -337,6 +416,7 @@ class MeshGL {
 
     fun setMesh(m: MeshData) {
         posBuf = fill(posBuf, m.pos); uvBuf = fill(uvBuf, m.uv); norBuf = fill(norBuf, m.normal)
+        if (m.detail != null) { val (t, b) = m.tangents; tanBuf = fill(tanBuf, t); bitBuf = fill(bitBuf, b) }
         if (trisRef !== m.tris) {
             trisRef = m.tris
             triBuf = sb(ShortArray(m.tris.size) { m.tris[it].toShort() }); triCount = m.tris.size
@@ -366,12 +446,27 @@ class MeshGL {
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex)
         GLES20.glUniform1i(GLES20.glGetUniformLocation(prog, "uTex"), 0)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, detTex)
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(prog, "uDet"), 1)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        val det = hasDetail && tanBuf != null
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(prog, "uHasDet"), if (det) 1 else 0)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(prog, "uDetail"), detailStrength)
+        GLES20.glUniform3f(GLES20.glGetUniformLocation(prog, "uLight"), light[0], light[1], light[2])
+    }
+
+    private fun constAttr(name: String) {
+        val loc = GLES20.glGetAttribLocation(prog, name)
+        if (loc >= 0) { GLES20.glDisableVertexAttribArray(loc); GLES20.glVertexAttrib3f(loc, 1f, 0f, 0f) }
     }
 
     fun drawMesh(mvp: FloatArray, model: FloatArray, mode: Int) {
         val p = posBuf ?: return
         begin(mvp, model, mode)
         attr("aPos", 3, p); attr("aUV", 2, uvBuf!!); attr("aNor", 3, norBuf!!)
+        val tb = tanBuf; val bb = bitBuf
+        if (tb != null && bb != null) { attr("aTan", 3, tb); attr("aBit", 3, bb) } else { constAttr("aTan"); constAttr("aBit") }
         if (mode == MODE_WIRE) GLES20.glDrawElements(GLES20.GL_LINES, lineCount, GLES20.GL_UNSIGNED_SHORT, lineBuf)
         else GLES20.glDrawElements(GLES20.GL_TRIANGLES, triCount, GLES20.GL_UNSIGNED_SHORT, triBuf)
     }
@@ -380,9 +475,49 @@ class MeshGL {
     fun drawBackground(u0: Float, u1: Float, v0: Float, v1: Float) {
         quadUv.position(0); quadUv.put(floatArrayOf(u0, v1, u1, v1, u0, v0, u1, v0)); quadUv.position(0)
         begin(identity, identity, MODE_BACKGROUND)
-        attr("aPos", 3, quadPos); attr("aUV", 2, quadUv)
+        attr("aPos", 3, quadPos); attr("aUV", 2, quadUv); constAttr("aTan"); constAttr("aBit")
         val nl = GLES20.glGetAttribLocation(prog, "aNor")
         if (nl >= 0) { GLES20.glDisableVertexAttribArray(nl); GLES20.glVertexAttrib3f(nl, 0f, 0f, 1f) }
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+    }
+}
+
+/**
+ * 사진에서 주름·피부 결 맵을 만듭니다.
+ * 큰 명암(조명, 피부색)은 걸러 내고 작은 명암 변화만 남겨 높이로 보고, 그 기울기를 노멀 맵으로 씁니다.
+ * 어두운 선(주름)은 홈, 밝은 부분은 솟은 곳으로 표현됩니다.
+ */
+object DetailMap {
+    fun make(tex: Bitmap): Bitmap {
+        check(org.opencv.android.OpenCVLoader.initLocal()) { "OpenCV를 불러오지 못했습니다" }
+        val cv = org.opencv.core.CvType.CV_32F
+        val rgba = org.opencv.core.Mat(); org.opencv.android.Utils.bitmapToMat(tex, rgba)
+        val gray = org.opencv.core.Mat(); org.opencv.imgproc.Imgproc.cvtColor(rgba, gray, org.opencv.imgproc.Imgproc.COLOR_RGBA2GRAY)
+        val g = org.opencv.core.Mat(); gray.convertTo(g, cv, 1.0 / 255.0)
+        val sz = tex.width.toDouble()
+        val zero = org.opencv.core.Size(0.0, 0.0)
+        val low = org.opencv.core.Mat(); org.opencv.imgproc.Imgproc.GaussianBlur(g, low, zero, sz / 110.0)
+        val hp = org.opencv.core.Mat(); org.opencv.core.Core.subtract(g, low, hp)
+        val h = org.opencv.core.Mat(); org.opencv.imgproc.Imgproc.GaussianBlur(hp, h, zero, maxOf(0.9, sz / 1000.0)) // 잡티 줄이기
+        val mean = org.opencv.core.MatOfDouble(); val std = org.opencv.core.MatOfDouble()
+        org.opencv.core.Core.meanStdDev(h, mean, std)
+        org.opencv.core.Core.multiply(h, org.opencv.core.Scalar(1.0 / (3.0 * maxOf(std.toArray()[0], 1e-6))), h)
+        val gx = org.opencv.core.Mat(); val gy = org.opencv.core.Mat()
+        org.opencv.imgproc.Imgproc.Sobel(h, gx, cv, 1, 0, 3)
+        org.opencv.imgproc.Imgproc.Sobel(h, gy, cv, 0, 1, 3)
+        org.opencv.core.Core.meanStdDev(gx, mean, std); val sx = std.toArray()[0]
+        org.opencv.core.Core.meanStdDev(gy, mean, std); val sy = std.toArray()[0]
+        val sc = 0.35 / maxOf(sx, sy, 1e-6)
+        val r8 = org.opencv.core.Mat(); val g8 = org.opencv.core.Mat(); val b8 = org.opencv.core.Mat()
+        gx.convertTo(r8, org.opencv.core.CvType.CV_8U, 127.5 * sc, 127.5)
+        gy.convertTo(g8, org.opencv.core.CvType.CV_8U, 127.5 * sc, 127.5)
+        h.convertTo(b8, org.opencv.core.CvType.CV_8U, 127.5 * 0.45, 127.5)
+        val a8 = org.opencv.core.Mat(h.rows(), h.cols(), org.opencv.core.CvType.CV_8U, org.opencv.core.Scalar(255.0))
+        val out = org.opencv.core.Mat()
+        org.opencv.core.Core.merge(listOf(r8, g8, b8, a8), out)
+        val bmp = Bitmap.createBitmap(tex.width, tex.height, Bitmap.Config.ARGB_8888)
+        org.opencv.android.Utils.matToBitmap(out, bmp)
+        listOf(rgba, gray, g, low, hp, h, gx, gy, r8, g8, b8, a8, out).forEach { it.release() }
+        return bmp
     }
 }

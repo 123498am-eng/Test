@@ -20,6 +20,8 @@ import android.view.ScaleGestureDetector
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.Button
+import android.widget.SeekBar
+import android.content.Intent
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -38,6 +40,9 @@ class Face3DActivity : ComponentActivity() {
     private lateinit var status: TextView
     private var mesh: MeshData? = null
     private var renderer: PhotoRenderer? = null
+    private var detail = false
+    private var lightMode = false
+    private lateinit var hint: TextView
     private var glView: GLSurfaceView? = null
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -46,6 +51,7 @@ class Face3DActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val live = intent.getBooleanExtra("live", false)
         val path = intent.getStringExtra("path")
+        detail = intent.getBooleanExtra("detail", false)
         if (!live && path == null) { finish(); return }
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(24, 24, 28)) }
@@ -55,32 +61,75 @@ class Face3DActivity : ComponentActivity() {
         }
         frame = FrameLayout(this)
         status = TextView(this).apply {
-            text = "고품질 3D 얼굴 모델 만드는 중..."; setTextColor(Color.WHITE); textSize = 15f; gravity = Gravity.CENTER
+            text = if (detail) "3D 자세히 보기 준비 중...\n(고해상도 텍스처와 주름 맵을 만듭니다)" else "고품질 3D 얼굴 모델 만드는 중..."
+            setTextColor(Color.WHITE); textSize = 15f; gravity = Gravity.CENTER
         }
         frame.addView(status, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         root.addView(frame, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
-        root.addView(TextView(this).apply {
-            text = "한 손가락: 돌리기 · 두 손가락: 확대/축소"; setTextColor(Color.LTGRAY); textSize = 12f
-            gravity = Gravity.CENTER; setPadding(0, dp(6), 0, dp(2))
-        })
-        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(4), dp(8), dp(8)) }
-        fun btn(t: String, f: (Button) -> Unit) = Button(this).apply { text = t; setOnClickListener { f(this) } }
-            .also { bar.addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)) }
-        val modes = listOf("사진 입힘", "음영", "선")
-        btn("보기: ${modes[0]}") { b ->
-            renderer?.let { r -> r.mode = (r.mode + 1) % 3; b.text = "보기: ${modes[r.mode]}"; glView?.requestRender() }
+        hint = TextView(this).apply {
+            text = if (detail) "한 손가락: 돌리기 · 두 손가락: 확대(최대 12배)/이동" else "한 손가락: 돌리기 · 두 손가락: 확대/축소"
+            setTextColor(Color.LTGRAY); textSize = 12f; gravity = Gravity.CENTER; setPadding(0, dp(6), 0, dp(2))
         }
-        btn("자동 회전") { b ->
-            renderer?.let { r -> r.autoRotate = !r.autoRotate; b.text = if (r.autoRotate) "회전 멈춤" else "자동 회전" }
-            glView?.renderMode = if (renderer?.autoRotate == true) GLSurfaceView.RENDERMODE_CONTINUOUSLY else GLSurfaceView.RENDERMODE_WHEN_DIRTY
+        root.addView(hint)
+        fun bar() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(2), dp(8), dp(2)) }
+        fun LinearLayout.btn(t: String, f: (Button) -> Unit) = Button(this@Face3DActivity).apply { text = t; textSize = 12f; setOnClickListener { f(this) } }
+            .also { addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)) }
+
+        if (detail) {
+            // 주름 강도
+            val row = bar()
+            row.addView(TextView(this).apply { text = "주름 강도"; setTextColor(Color.WHITE); textSize = 13f; setPadding(dp(4), 0, dp(8), 0) })
+            row.addView(SeekBar(this).apply {
+                max = 150; progress = 60
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(sb: SeekBar, p: Int, fromUser: Boolean) { renderer?.detailStrength = p / 100f; glView?.requestRender() }
+                    override fun onStartTrackingTouch(sb: SeekBar) {}
+                    override fun onStopTrackingTouch(sb: SeekBar) {}
+                })
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            root.addView(row)
         }
-        btn("OBJ 저장") { exportObj() }
+        val bar = bar()
+        val modes = if (detail) listOf("사진+주름", "점토(굴곡만)", "선", "사진만") else listOf("사진 입힘", "음영", "선")
+        val modeIds = if (detail) listOf(MeshGL.MODE_TEXTURE, MeshGL.MODE_SHADED, MeshGL.MODE_WIRE, MeshGL.MODE_PHOTO_ONLY)
+            else listOf(MeshGL.MODE_TEXTURE, MeshGL.MODE_SHADED, MeshGL.MODE_WIRE)
+        var modeIdx = 0
+        bar.btn("보기: ${modes[0]}") { b ->
+            modeIdx = (modeIdx + 1) % modes.size
+            renderer?.let { r -> r.mode = modeIds[modeIdx]; b.text = "보기: ${modes[modeIdx]}"; glView?.requestRender() }
+        }
+        if (detail) {
+            bar.btn("조명 이동") { b ->
+                lightMode = !lightMode
+                b.text = if (lightMode) "조명 이동 중" else "조명 이동"
+                hint.text = if (lightMode) "한 손가락으로 끌어 조명 방향을 바꾸세요 (비스듬한 빛에서 주름이 잘 보입니다)"
+                    else "한 손가락: 돌리기 · 두 손가락: 확대(최대 12배)/이동"
+            }
+            bar.btn("처음으로") { renderer?.let { it.yaw = 0f; it.pitch = 0f; it.zoom = 1f; it.panX = 0f; it.panY = 0f }; glView?.requestRender() }
+        } else {
+            bar.btn("자동 회전") { b ->
+                renderer?.let { r -> r.autoRotate = !r.autoRotate; b.text = if (r.autoRotate) "회전 멈춤" else "자동 회전" }
+                glView?.renderMode = if (renderer?.autoRotate == true) GLSurfaceView.RENDERMODE_CONTINUOUSLY else GLSurfaceView.RENDERMODE_WHEN_DIRTY
+            }
+            bar.btn("자세히 보기") {
+                startActivity(Intent(intent).putExtra("detail", true))
+            }
+        }
+        bar.btn("OBJ 저장") { exportObj() }
         root.addView(bar)
         setContentView(root)
 
         if (live) {
             val m = ModelHolder.mesh
-            if (m == null) status.text = "모델이 없습니다" else showMesh(m)
+            if (m == null) { status.text = "모델이 없습니다"; return }
+            if (!detail) { showMesh(m); return }
+            thread {
+                // 실시간 카메라로 만든 모델: 텍스처(512px)에서 주름 맵을 만듭니다
+                val r = runCatching {
+                    MeshData(m.pos, m.uv, m.normal, m.tris, m.texture).also { d -> d.detail = m.texture?.let { DetailMap.make(it) } }
+                }
+                runOnUiThread { r.getOrNull()?.let { showMesh(it) } ?: run { status.text = "오류: ${r.exceptionOrNull()?.message}" } }
+            }
             return
         }
         thread {
@@ -96,9 +145,13 @@ class Face3DActivity : ComponentActivity() {
         }
     }
 
-    /** 고해상도로 열어서 얼굴 점을 찾고, 얼굴 부분만 1024px 텍스처로 잘라 씁니다. */
+    /**
+     * 고해상도로 열어서 얼굴 점을 찾고, 얼굴 부분만 텍스처로 잘라 씁니다.
+     * 기본: 원본 2048px → 텍스처 1024px. 자세히 보기: 원본 4096px → 텍스처 2048px + 주름 맵 + 더 잘게 나눈 메시.
+     */
     private fun buildMesh(file: File): MeshData? {
-        val bmp = FaceMatcher.decodeFile(file, 2048)
+        val bmp = if (detail) runCatching { FaceMatcher.decodeFile(file, 4096) }.getOrElse { FaceMatcher.decodeFile(file, 2048) }
+            else FaceMatcher.decodeFile(file, 2048)
         val res = FaceMesh.analyze(this, bmp) ?: return null
         val w = bmp.width.toFloat(); val h = bmp.height.toFloat()
         var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
@@ -109,7 +162,7 @@ class Face3DActivity : ComponentActivity() {
         val side = maxOf(maxX - minX, maxY - minY) * 1.15f
         val cx = (minX + maxX) / 2; val cy = (minY + maxY) / 2
         val crop = RectF(cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2)
-        val texSize = 1024
+        val texSize = if (detail) 2048 else 1024
         val tex = Bitmap.createBitmap(texSize, texSize, Bitmap.Config.ARGB_8888)
         Canvas(tex).apply {
             drawColor(Color.rgb(40, 34, 32))
@@ -118,7 +171,14 @@ class Face3DActivity : ComponentActivity() {
         }
         // drawBitmap 은 정수 영역으로 잘라서, 텍스처 좌표도 같은 영역으로 맞춥니다
         val used = RectF(crop.left.toInt().toFloat(), crop.top.toInt().toFloat(), crop.right.toInt().toFloat(), crop.bottom.toInt().toFloat())
-        return MeshData.build(Subdivision.get(this), res.points, w, h, used, tex)
+        val mesh = MeshData.build(Subdivision.get(this, if (detail) 3 else 2), res.points, w, h, used, tex)
+        if (detail) {
+            runOnUiThread { status.text = "주름 맵 만드는 중..." }
+            mesh.detail = DetailMap.make(tex)
+            mesh.tangents // 미리 계산
+        }
+        bmp.recycle()
+        return mesh
     }
 
     private fun showMesh(m: MeshData) {
@@ -133,18 +193,35 @@ class Face3DActivity : ComponentActivity() {
         }
         glView = v
         var lastX = 0f; var lastY = 0f
+        if (detail) { r.light = floatArrayOf(0.75f, 0.55f, 0.6f) } // 비스듬한 빛: 주름이 잘 보임
+        var lastFx = 0f; var lastFy = 0f
         val scale = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScaleBegin(d: ScaleGestureDetector): Boolean { lastFx = d.focusX; lastFy = d.focusY; return true }
             override fun onScale(d: ScaleGestureDetector): Boolean {
-                r.zoom = (r.zoom * d.scaleFactor).coerceIn(0.4f, 4f); v.requestRender(); return true
+                r.zoom = (r.zoom * d.scaleFactor).coerceIn(0.4f, if (detail) 12f else 4f)
+                if (detail) {
+                    // 두 손가락 이동: 화면 이동 (확대할수록 천천히)
+                    val k = 2.4f / (v.height.coerceAtLeast(1) * r.zoom)
+                    r.panX -= (d.focusX - lastFx) * k; r.panY += (d.focusY - lastFy) * k
+                    lastFx = d.focusX; lastFy = d.focusY
+                }
+                v.requestRender(); return true
             }
         })
         v.setOnTouchListener { _, e ->
             scale.onTouchEvent(e)
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> { lastX = e.x; lastY = e.y }
-                MotionEvent.ACTION_MOVE -> if (e.pointerCount == 1 && !scale.isInProgress) {
-                    r.yaw += (e.x - lastX) * 0.4f
-                    r.pitch = (r.pitch + (e.y - lastY) * 0.4f).coerceIn(-85f, 85f)
+                MotionEvent.ACTION_MOVE -> if (e.pointerCount == 1 && !scale.isInProgress && lightMode) {
+                    // 조명 방향: 화면에서 손가락 위치 쪽에서 빛이 옵니다
+                    val lx = (e.x / v.width.coerceAtLeast(1)) * 2f - 1f
+                    val ly = 1f - (e.y / v.height.coerceAtLeast(1)) * 2f
+                    r.light = floatArrayOf(lx * 1.2f, ly * 1.2f, 0.45f)
+                    v.requestRender()
+                } else if (e.pointerCount == 1 && !scale.isInProgress) {
+                    val sp = 0.4f / maxOf(1f, r.zoom * 0.5f)
+                    r.yaw += (e.x - lastX) * sp
+                    r.pitch = (r.pitch + (e.y - lastY) * sp).coerceIn(-85f, 85f)
                     lastX = e.x; lastY = e.y
                     v.requestRender()
                 }
@@ -198,6 +275,10 @@ class PhotoRenderer(private val m: MeshData) : GLSurfaceView.Renderer {
     @Volatile var zoom = 1f
     @Volatile var mode = MeshGL.MODE_TEXTURE
     @Volatile var autoRotate = false
+    @Volatile var panX = 0f
+    @Volatile var panY = 0f
+    @Volatile var light = floatArrayOf(0.35f, 0.45f, 1f)
+    @Volatile var detailStrength = 0.6f
     private var lastTime = 0L
     private val gl = MeshGL()
     private val proj = FloatArray(16); private val view = FloatArray(16)
@@ -206,6 +287,7 @@ class PhotoRenderer(private val m: MeshData) : GLSurfaceView.Renderer {
     override fun onSurfaceCreated(g: GL10?, config: EGLConfig?) {
         gl.init()
         m.texture?.let { gl.uploadTexture(it) }
+        m.detail?.let { gl.uploadDetail(it) }
         gl.setMesh(m)
         GLES20.glClearColor(0.094f, 0.094f, 0.11f, 1f)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
@@ -213,7 +295,7 @@ class PhotoRenderer(private val m: MeshData) : GLSurfaceView.Renderer {
 
     override fun onSurfaceChanged(g: GL10?, w: Int, h: Int) {
         GLES20.glViewport(0, 0, w, h)
-        Matrix.perspectiveM(proj, 0, 35f, w.toFloat() / h.coerceAtLeast(1), 0.1f, 50f)
+        Matrix.perspectiveM(proj, 0, 35f, w.toFloat() / h.coerceAtLeast(1), 0.02f, 50f)
     }
 
     override fun onDrawFrame(g: GL10?) {
@@ -221,7 +303,9 @@ class PhotoRenderer(private val m: MeshData) : GLSurfaceView.Renderer {
         if (autoRotate && lastTime != 0L) yaw -= (now - lastTime) / 1e9f * 25f
         lastTime = now
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-        Matrix.setLookAtM(view, 0, 0f, 0f, 4.2f / zoom, 0f, 0f, 0f, 0f, 1f, 0f)
+        Matrix.setLookAtM(view, 0, panX, panY, 4.2f / zoom, panX, panY, 0f, 0f, 1f, 0f)
+        gl.light = light
+        gl.detailStrength = detailStrength
         Matrix.setIdentityM(model, 0)
         Matrix.rotateM(model, 0, pitch, 1f, 0f, 0f)
         Matrix.rotateM(model, 0, yaw, 0f, 1f, 0f)

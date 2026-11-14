@@ -50,6 +50,13 @@ class PhotoActivity : ComponentActivity() {
         root.addView(image, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
 
         root.addView(Button(this).apply {
+            text = "3D 자세히 보기 (주름·피부 결)"
+            setOnClickListener {
+                startActivity(Intent(this@PhotoActivity, Face3DActivity::class.java).putExtra("path", file.absolutePath).putExtra("detail", true))
+            }
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
+
+        root.addView(Button(this).apply {
             text = "3D 얼굴 모델 보기"
             setOnClickListener {
                 startActivity(Intent(this@PhotoActivity, Face3DActivity::class.java).putExtra("path", file.absolutePath))

@@ -368,6 +368,7 @@ class LiveActivity : ComponentActivity() {
         val model = face.model
         if (model != null) {
             m.add(0, 1, 0, "3D 모델 크게 보기")
+            m.add(0, 7, 0, "3D 자세히 보기 (주름)")
             m.add(0, 2, 1, "OBJ로 저장")
             m.add(0, 3, 2, if (face.hidden) "모델 보이기" else "모델 숨기기")
             m.add(0, 4, 3, if (face.side == 2) "모델을 왼쪽으로" else "모델을 오른쪽으로")
@@ -378,6 +379,7 @@ class LiveActivity : ComponentActivity() {
             when (item.itemId) {
                 1 -> { ModelHolder.mesh = model!!.mesh; startActivity(Intent(this, Face3DActivity::class.java).putExtra("live", true)) }
                 2 -> ObjExport.save(this, model!!.mesh)
+                7 -> { ModelHolder.mesh = model!!.mesh; startActivity(Intent(this, Face3DActivity::class.java).putExtra("live", true).putExtra("detail", true)) }
                 3 -> faceCommands += { ts -> ts.find { it.id == face.id }?.let { it.hidden = !it.hidden } }
                 4 -> faceCommands += { ts -> ts.find { it.id == face.id }?.let { it.sideOverride = if (face.side == 2) 1 else 2 } }
                 5 -> faceCommands += { ts -> ts.find { it.id == face.id }?.let { it.model = null; it.sum = null; it.frames = 0; it.start = SystemClock.uptimeMillis() } }
