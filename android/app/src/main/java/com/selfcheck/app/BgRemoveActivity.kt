@@ -46,6 +46,7 @@ import com.google.mediapipe.tasks.components.containers.NormalizedKeypoint
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.interactivesegmenter.InteractiveSegmenter
+import com.google.mediapipe.tasks.vision.imagesegmenter.ImageSegmenter
 import java.nio.ByteOrder
 import kotlin.concurrent.thread
 import kotlin.math.abs
@@ -351,7 +352,58 @@ object Cutout {
      * 결과 중 사각형(25% 넓힘) 안에 80% 이상 들어가는 것만 합쳐서, 바깥 배경이 딸려 오지 않게 합니다.
      * 그 뒤 물체 안쪽의 구멍을 메우고, 경계만 살짝 부드럽게 합니다. 결과: 작은 크기의 0~255 마스크.
      */
-    private fun aiMask(seg: InteractiveSegmenter, src: Bitmap, rect: RectF, maxSide: Int, points: Int): Mat? {
+    /** 사람 분할(머리카락·얼굴 피부·몸·옷·마스크 같은 액세서리): 사람일 확률(0~1) 맵, 크기 w×h */
+    private fun personConf(ps: ImageSegmenter, img: Bitmap, w: Int, h: Int): Mat? {
+        val res = ps.segment(BitmapImageBuilder(img).build())
+        val bg = res.confidenceMasks().orElse(null)?.firstOrNull() ?: return null // 0번 = 배경
+        val buf = ByteBufferExtractor.extract(bg).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        val arr = FloatArray(bg.width * bg.height); buf.position(0); buf.get(arr)
+        val m = Mat(bg.height, bg.width, CvType.CV_32F); m.put(0, 0, arr)
+        Core.subtract(Mat(m.size(), CvType.CV_32F, Scalar(1.0)), m, m) // 사람 = 1 - 배경
+        if (m.cols() != w || m.rows() != h) Imgproc.resize(m, m, Size(w.toDouble(), h.toDouble()), 0.0, 0.0, Imgproc.INTER_LINEAR)
+        return m
+    }
+
+    /**
+     * 사각형 안에 사람이 있으면: 물체 AI 가 찾은 모양의 윤곽(볼록 껍질) 안에서 "확실히 사람"인 곳을 채웁니다.
+     * 물체 AI 는 머리카락·마스크와 얼굴 피부를 따로 보고 얼굴을 지우기도 하는데, 이것으로 막습니다.
+     * 또 사람이 아니면서 사각형 밖으로 많이 나간 덩어리(천장 등)는 버립니다.
+     */
+    private fun personFix(union: Mat, p: Mat, rect: org.opencv.core.Rect) {
+        val w = union.cols(); val h = union.rows()
+        val strong = Mat(); Imgproc.threshold(p, strong, 0.75, 255.0, Imgproc.THRESH_BINARY); strong.convertTo(strong, CvType.CV_8U)
+        val rr = org.opencv.core.Rect(rect.x.coerceIn(0, w - 1), rect.y.coerceIn(0, h - 1), 1, 1)
+        rr.width = rect.width.coerceIn(1, w - rr.x); rr.height = rect.height.coerceIn(1, h - rr.y)
+        val personInRect = Core.countNonZero(strong.submat(rr))
+        if (personInRect < rr.area() * 0.15) { strong.release(); return } // 사람 장면이 아님
+        // 사람이 아닌 덩어리 중 사각형 밖으로 절반 넘게 나간 것은 버림
+        val labels = Mat(); val stats = Mat(); val cent = Mat()
+        val n = Imgproc.connectedComponentsWithStats(union, labels, stats, cent)
+        val comp = Mat(); val tmp = Mat()
+        val half = Mat(); Imgproc.threshold(p, half, 0.5, 255.0, Imgproc.THRESH_BINARY); half.convertTo(half, CvType.CV_8U)
+        for (i in 1 until n) {
+            val area = stats.get(i, Imgproc.CC_STAT_AREA)[0]
+            Core.compare(labels, Scalar(i.toDouble()), comp, Core.CMP_EQ)
+            Core.bitwise_and(comp, half, tmp); val personPart = Core.countNonZero(tmp)
+            val inRect = Core.countNonZero(comp.submat(rr))
+            if (personPart < area * 0.1 && inRect < area * 0.5) union.setTo(Scalar(0.0), comp)
+        }
+        // 물체 모양의 볼록 껍질 안에서 확실한 사람 부분을 채움
+        val pts = Mat(); Core.findNonZero(union, pts)
+        if (pts.rows() > 2) {
+            val mp = org.opencv.core.MatOfPoint(); pts.convertTo(mp, CvType.CV_32S)
+            val hullIdx = org.opencv.core.MatOfInt(); Imgproc.convexHull(mp, hullIdx)
+            val all = mp.toArray(); val hp = hullIdx.toArray().map { all[it] }
+            val hull = Mat.zeros(h, w, CvType.CV_8U)
+            Imgproc.fillConvexPoly(hull, org.opencv.core.MatOfPoint(*hp.toTypedArray()), Scalar(255.0))
+            Core.bitwise_and(strong, hull, tmp)
+            Core.bitwise_or(union, tmp, union)
+            hull.release(); mp.release(); hullIdx.release()
+        } else Core.bitwise_and(strong, Mat(h, w, CvType.CV_8U, Scalar(255.0)), union)
+        listOf(strong, labels, stats, cent, comp, tmp, half, pts).forEach { it.release() }
+    }
+
+    private fun aiMask(seg: InteractiveSegmenter, src: Bitmap, rect: RectF, maxSide: Int, points: Int, person: ImageSegmenter? = null): Mat? {
         val sc = min(1f, maxSide.toFloat() / max(src.width, src.height))
         val small = if (sc < 1f) Bitmap.createScaledBitmap(src, (src.width * sc).toInt(), (src.height * sc).toInt(), true) else src
         try {
@@ -382,6 +434,13 @@ object Cutout {
                 org.opencv.core.Point(((rect.right + rect.width() * 0.6f) * sc).toDouble(), ((rect.bottom + rect.height() * 0.6f) * sc).toDouble()), Scalar(255.0), -1)
             Core.bitwise_and(union, big, union); big.release()
             keepTouching(union, org.opencv.core.Rect((rect.left * sc).toInt(), (rect.top * sc).toInt(), (rect.width() * sc).toInt().coerceAtLeast(1), (rect.height() * sc).toInt().coerceAtLeast(1)))
+            // 사람이면 사람 분할로 빠진 얼굴 등을 채움
+            if (person != null) runCatching {
+                personConf(person, small, w, h)?.let { pc ->
+                    personFix(union, pc, org.opencv.core.Rect((rect.left * sc).toInt(), (rect.top * sc).toInt(), (rect.width() * sc).toInt().coerceAtLeast(1), (rect.height() * sc).toInt().coerceAtLeast(1)))
+                    pc.release()
+                }
+            }
             if (Core.countNonZero(union) < w * h / 400) { union.release(); return null }
             fillHoles(union)
             Imgproc.GaussianBlur(union, union, Size(0.0, 0.0), 1.2) // 경계만 부드럽게
@@ -424,10 +483,17 @@ object Cutout {
         val total = Core.countNonZero(m).toDouble()
         for (i in contours.indices) {
             val parent = hier.get(0, i)[3].toInt()
-            if (parent >= 0 && Imgproc.contourArea(contours[i]) <= total * 0.08) Imgproc.drawContours(m, contours, i, Scalar(255.0), -1)
+            if (parent >= 0 && Imgproc.contourArea(contours[i]) <= total * 0.15) Imgproc.drawContours(m, contours, i, Scalar(255.0), -1)
         }
         hier.release()
     }
+
+    private fun personSegmenter(ctx: Context): ImageSegmenter? = runCatching {
+        fun make(d: Delegate) = ImageSegmenter.createFromOptions(ctx, ImageSegmenter.ImageSegmenterOptions.builder()
+            .setBaseOptions(BaseOptions.builder().setModelAssetPath("selfie_multiclass_256x256.tflite").setDelegate(d).build())
+            .setOutputConfidenceMasks(true).setOutputCategoryMask(false).build())
+        runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
+    }.getOrNull()
 
     private fun segmenter(ctx: Context): InteractiveSegmenter {
         fun make(d: Delegate) = InteractiveSegmenter.createFromOptions(ctx, InteractiveSegmenter.InteractiveSegmenterOptions.builder()
@@ -439,13 +505,14 @@ object Cutout {
     /** 사진: AI 로 물체 모양 → 원래 크기 알파 마스크. AI 가 못 찾으면 GrabCut. */
     fun photoMask(ctx: Context, src: Bitmap, rect: Rect): Mat {
         val seg = segmenter(ctx)
+        val person = personSegmenter(ctx)
         try {
-            val m = aiMask(seg, src, RectF(rect), 1024, 7) ?: return grabCutMask(src, rect)
+            val m = aiMask(seg, src, RectF(rect), 1024, 7, person) ?: return grabCutMask(src, rect)
             val full = Mat(); Imgproc.resize(m, full, Size(src.width.toDouble(), src.height.toDouble()), 0.0, 0.0, Imgproc.INTER_LINEAR)
             m.release()
             return full
         } finally {
-            seg.close()
+            seg.close(); person?.close()
         }
     }
 
@@ -456,6 +523,7 @@ object Cutout {
      */
     class VideoTracker(ctx: Context, rect: Rect, private val w0: Int, private val h0: Int) {
         private val seg = segmenter(ctx)
+        private val person = personSegmenter(ctx)
         private val r0 = RectF(rect)
         private var area = RectF(rect)
         private var prev: Mat? = null
@@ -463,7 +531,7 @@ object Cutout {
         fun next(frame: Bitmap): Mat {
             val rx = frame.width.toFloat() / w0; val ry = frame.height.toFloat() / h0
             val r = RectF(area.left * rx, area.top * ry, area.right * rx, area.bottom * ry)
-            var m = aiMask(seg, frame, r, 512, 3)
+            var m = aiMask(seg, frame, r, 512, 3, person)
             val p = prev
             if (m == null) m = p?.clone() ?: Mat.zeros(1, 1, CvType.CV_8U)
             else if (p != null && p.size() == m.size() && Core.countNonZero(m) < Core.countNonZero(p) * 0.7) Core.max(m, p, m)
@@ -484,7 +552,7 @@ object Cutout {
             return full
         }
 
-        fun close() { seg.close(); prev?.release() }
+        fun close() { seg.close(); person?.close(); prev?.release() }
     }
 
     /** 알파 마스크로 물체만 남기고 배경을 바꿉니다. 마스크는 이 함수에서 해제합니다. */
