@@ -44,7 +44,9 @@ class Face3DActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val file = File(intent.getStringExtra("path") ?: run { finish(); return })
+        val live = intent.getBooleanExtra("live", false)
+        val path = intent.getStringExtra("path")
+        if (!live && path == null) { finish(); return }
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(24, 24, 28)) }
         root.setOnApplyWindowInsetsListener { v, insets ->
@@ -76,8 +78,13 @@ class Face3DActivity : ComponentActivity() {
         root.addView(bar)
         setContentView(root)
 
+        if (live) {
+            val m = ModelHolder.mesh
+            if (m == null) status.text = "모델이 없습니다" else showMesh(m)
+            return
+        }
         thread {
-            val result = runCatching { buildMesh(file) }
+            val result = runCatching { buildMesh(File(path!!)) }
             runOnUiThread {
                 val m = result.getOrNull()
                 when {
@@ -152,9 +159,15 @@ class Face3DActivity : ComponentActivity() {
     override fun onPause() { super.onPause(); glView?.onPause() }
     override fun onResume() { super.onResume(); glView?.onResume() }
 
-    /** face.obj + face.mtl + face.jpg 를 zip 하나로 묶어 다운로드 폴더에 저장합니다. */
     private fun exportObj() {
         val m = mesh ?: run { Toast.makeText(this, "모델이 아직 없습니다", Toast.LENGTH_SHORT).show(); return }
+        ObjExport.save(this, m)
+    }
+}
+
+/** face.obj + face.mtl + face.jpg 를 zip 하나로 묶어 다운로드 폴더에 저장합니다. */
+object ObjExport {
+    fun save(act: android.app.Activity, m: MeshData) {
         thread {
             val name = "face_3d_${System.currentTimeMillis()}.zip"
             val msg = runCatching {
@@ -165,16 +178,16 @@ class Face3DActivity : ComponentActivity() {
                         put(MediaStore.Downloads.MIME_TYPE, "application/zip")
                         put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SelfCheck")
                     }
-                    val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)!!
-                    contentResolver.openOutputStream(uri)!!.use(write)
+                    val uri = act.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)!!
+                    act.contentResolver.openOutputStream(uri)!!.use(write)
                     "다운로드/SelfCheck/$name 에 저장했습니다"
                 } else {
-                    val f = File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), name)
+                    val f = File(act.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), name)
                     f.outputStream().use(write)
                     "${f.absolutePath} 에 저장했습니다"
                 }
             }.getOrElse { "저장 실패: ${it.message}" }
-            runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
+            act.runOnUiThread { Toast.makeText(act, msg, Toast.LENGTH_LONG).show() }
         }
     }
 }

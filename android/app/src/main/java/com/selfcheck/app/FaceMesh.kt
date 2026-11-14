@@ -50,6 +50,17 @@ object FaceMesh {
         return runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
     }
 
+    /** 원거리용: 잘라 낸 영역 한 장씩 분석 (IMAGE 모드). */
+    fun createRoi(ctx: Context): FaceLandmarker {
+        fun make(d: Delegate) = FaceLandmarker.createFromOptions(ctx, FaceLandmarker.FaceLandmarkerOptions.builder()
+            .setBaseOptions(BaseOptions.builder().setModelAssetPath("face_landmarker.task").setDelegate(d).build())
+            .setRunningMode(RunningMode.IMAGE)
+            .setNumFaces(3)
+            .setMinFaceDetectionConfidence(0.4f)
+            .build())
+        return runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
+    }
+
     fun analyze(ctx: Context, bmp: Bitmap): FaceMeshResult? {
         val lm = create(ctx, RunningMode.IMAGE, 5, true)
         try {
@@ -77,7 +88,7 @@ object FaceMesh {
     }
 
     /** 눈꼬리·이마·턱 점으로 얼굴 방향을 대략 추정합니다 (도 단위, 화면 기준). */
-    private fun headAngles(p: FloatArray, w: Float, h: Float): Triple<Float, Float, Float> {
+    fun headAngles(p: FloatArray, w: Float, h: Float): Triple<Float, Float, Float> {
         fun v(i: Int) = floatArrayOf(p[i * 3] * w, p[i * 3 + 1] * h, p[i * 3 + 2] * w)
         val r = v(33); val l = v(263); val top = v(10); val chin = v(152)
         val ax = floatArrayOf(l[0] - r[0], l[1] - r[1], l[2] - r[2])
