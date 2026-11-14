@@ -169,8 +169,7 @@ class MeshData(val pos: FloatArray, val uv: FloatArray, val normal: FloatArray, 
          * uvRect: 텍스처로 쓰는 사진 영역(픽셀). prevPos 를 주면 프레임 사이 떨림을 줄입니다.
          */
         /** 얼굴 점 468개를 사진 픽셀 좌표(y 위쪽, z 카메라 쪽)로 바꿉니다. */
-        fun imageBase(points: FloatArray, imgW: Float, imgH: Float): FloatArray {
-            val n = Subdivision.BASE
+        fun imageBase(points: FloatArray, imgW: Float, imgH: Float, n: Int = Subdivision.BASE): FloatArray {
             val base = FloatArray(n * 3)
             for (i in 0 until n) {
                 base[i * 3] = points[i * 3] * imgW

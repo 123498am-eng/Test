@@ -29,6 +29,7 @@ import java.io.FileDescriptor
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** 동영상에서 프레임을 차례로 꺼냅니다 (회전 보정, 크기 줄이기 포함). */
@@ -76,11 +77,19 @@ class VideoSource(ctx: Context, uri: Uri) : Closeable {
  * 비트맵을 차례로 받아 MP4(H.264)로 저장합니다. 생성, addFrame, finish 를 모두 같은 스레드에서 불러야 합니다.
  * width/height 는 16의 배수를 권장합니다.
  */
-class VideoEncoder(fd: FileDescriptor, val width: Int, val height: Int, fps: Int) {
+class VideoEncoder(fd: FileDescriptor, val width: Int, val height: Int, fps: Int, private val audio: AudioSource? = null) {
     private val codec = MediaCodec.createEncoderByType("video/avc")
     private val muxer = MediaMuxer(fd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
     private var track = -1
-    private var muxStarted = false
+    private var audioTrack = -1
+    private var audioExpected = audio != null // init 보다 먼저 선언 (소리 쪽이 init 안에서 바꿀 수 있음)
+    @Volatile private var muxStarted = false
+    private val muxLock = Object()
+    private var videoFormat: MediaFormat? = null
+    private var audioFormat: MediaFormat? = null
+    private val pendingVideo = ArrayList<Pair<ByteArray, MediaCodec.BufferInfo>>()
+    private val pendingAudio = ArrayList<Pair<ByteArray, MediaCodec.BufferInfo>>()
+    private var lastVideoUs = 0L
     private val info = MediaCodec.BufferInfo()
     private val surface: Surface
     private var display: EGLDisplay = EGL14.EGL_NO_DISPLAY
@@ -104,7 +113,43 @@ class VideoEncoder(fd: FileDescriptor, val width: Int, val height: Int, fps: Int
         codec.start()
         setupEgl()
         setupGl()
+        audio?.start(this)
     }
+
+    // ----- 소리와 영상 트랙을 함께 담기: 두 형식이 모두 정해져야 저장을 시작합니다 -----
+
+    fun onAudioFormat(f: MediaFormat) = synchronized(muxLock) { audioFormat = f; maybeStart() }
+
+    /** 소리가 없을 때 (원본에 소리 트랙이 없음 등) */
+    fun noAudio() = synchronized(muxLock) { audioExpected = false; maybeStart() }
+
+    private fun maybeStart() {
+        if (muxStarted) return
+        val v = videoFormat ?: return
+        if (audioExpected && audioFormat == null) return
+        track = muxer.addTrack(v)
+        audioFormat?.let { audioTrack = muxer.addTrack(it) }
+        muxer.start(); muxStarted = true
+        pendingVideo.forEach { (b, i) -> muxer.writeSampleData(track, ByteBuffer.wrap(b), i) }
+        pendingAudio.forEach { (b, i) -> muxer.writeSampleData(audioTrack, ByteBuffer.wrap(b), i) }
+        pendingVideo.clear(); pendingAudio.clear()
+    }
+
+    private fun copyInfo(i: MediaCodec.BufferInfo) = MediaCodec.BufferInfo().apply { set(0, i.size, i.presentationTimeUs, i.flags) }
+
+    private fun bytes(buf: ByteBuffer, i: MediaCodec.BufferInfo): ByteArray {
+        val b = ByteArray(i.size); buf.position(i.offset); buf.limit(i.offset + i.size); buf.get(b); return b
+    }
+
+    /** 소리 한 조각 저장 (소리 쪽 스레드에서 불러도 됨) */
+    fun writeAudio(buf: ByteBuffer, info: MediaCodec.BufferInfo) = synchronized(muxLock) {
+        if (info.size <= 0) return@synchronized
+        if (muxStarted && audioTrack >= 0) { buf.position(info.offset); buf.limit(info.offset + info.size); muxer.writeSampleData(audioTrack, buf, info) }
+        else if (!muxStarted) pendingAudio += bytes(buf, info) to copyInfo(info)
+    }
+
+    /** 지금까지 저장한 영상 길이 (마이크로초) */
+    val videoEndUs get() = lastVideoUs
 
     private fun setupEgl() {
         display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
@@ -162,15 +207,16 @@ class VideoEncoder(fd: FileDescriptor, val width: Int, val height: Int, fps: Int
             val idx = codec.dequeueOutputBuffer(info, 10_000)
             when {
                 idx == MediaCodec.INFO_TRY_AGAIN_LATER -> { if (!end || ++idle > 300) return }
-                idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                    track = muxer.addTrack(codec.outputFormat); muxer.start(); muxStarted = true
-                }
+                idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> synchronized(muxLock) { videoFormat = codec.outputFormat; maybeStart() }
                 idx >= 0 -> {
                     val buf = codec.getOutputBuffer(idx)
                     if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) info.size = 0
-                    if (buf != null && info.size > 0 && muxStarted) {
-                        buf.position(info.offset); buf.limit(info.offset + info.size)
-                        muxer.writeSampleData(track, buf, info)
+                    if (buf != null && info.size > 0) synchronized(muxLock) {
+                        lastVideoUs = max(lastVideoUs, info.presentationTimeUs)
+                        if (muxStarted) {
+                            buf.position(info.offset); buf.limit(info.offset + info.size)
+                            muxer.writeSampleData(track, buf, info)
+                        } else pendingVideo += bytes(buf, info) to copyInfo(info)
                     }
                     codec.releaseOutputBuffer(idx, false)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
@@ -182,7 +228,13 @@ class VideoEncoder(fd: FileDescriptor, val width: Int, val height: Int, fps: Int
     fun finish() {
         runCatching { codec.signalEndOfInputStream(); drain(true) }
         runCatching { codec.stop() }; codec.release()
-        runCatching { if (muxStarted) muxer.stop() }; muxer.release()
+        runCatching { audio?.finish(this) }
+        synchronized(muxLock) {
+            if (!muxStarted && videoFormat != null) { audioFormat = null; runCatching { track = muxer.addTrack(videoFormat!!); muxer.start(); muxStarted = true
+                pendingVideo.forEach { (b, i) -> muxer.writeSampleData(track, ByteBuffer.wrap(b), i) } } }
+            runCatching { if (muxStarted) muxer.stop() }
+        }
+        muxer.release()
         EGL14.eglMakeCurrent(display, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
         EGL14.eglDestroySurface(display, eglSurface)
         EGL14.eglDestroyContext(display, context)
@@ -197,6 +249,110 @@ class VideoEncoder(fd: FileDescriptor, val width: Int, val height: Int, fps: Int
             fun r(v: Float) = ((v / 16f).roundToInt() * 16).coerceAtLeast(16)
             return r(w * sc) to r(h * sc)
         }
+    }
+}
+
+/** 동영상에 넣을 소리 */
+interface AudioSource {
+    /** 인코더가 만들어질 때: 형식을 알려 주고(onAudioFormat), 필요하면 녹음을 시작 */
+    fun start(enc: VideoEncoder)
+    /** 영상이 끝났을 때: 남은 소리를 모두 저장 */
+    fun finish(enc: VideoEncoder)
+}
+
+/** 원본 동영상의 소리를 다시 압축하지 않고 그대로 옮깁니다 (영상 길이만큼). */
+class AudioPassthrough(ctx: Context, uri: Uri) : AudioSource {
+    private val ex = android.media.MediaExtractor().apply { setDataSource(ctx, uri, null) }
+    private val trackIdx = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+
+    override fun start(enc: VideoEncoder) {
+        val t = trackIdx
+        if (t == null) { ex.release(); enc.noAudio(); return }
+        ex.selectTrack(t)
+        enc.onAudioFormat(ex.getTrackFormat(t))
+    }
+
+    override fun finish(enc: VideoEncoder) {
+        if (trackIdx == null) return
+        try {
+            val buf = ByteBuffer.allocateDirect(1 shl 20)
+            val info = MediaCodec.BufferInfo()
+            val end = enc.videoEndUs + 50_000
+            while (true) {
+                val n = ex.readSampleData(buf, 0)
+                if (n < 0 || ex.sampleTime > end) break
+                val flags = if (ex.sampleFlags and android.media.MediaExtractor.SAMPLE_FLAG_SYNC != 0) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                info.set(0, n, ex.sampleTime, flags)
+                enc.writeAudio(buf, info)
+                ex.advance()
+            }
+        } finally { ex.release() }
+    }
+}
+
+/** 마이크 소리를 AAC 로 압축해 넣습니다 (녹음 권한이 있을 때만). */
+class MicAudio : AudioSource {
+    private val rate = 44100
+    private val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+    @android.annotation.SuppressLint("MissingPermission")
+    private val rec = android.media.AudioRecord(android.media.MediaRecorder.AudioSource.MIC, rate,
+        android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT,
+        max(8192, android.media.AudioRecord.getMinBufferSize(rate, android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT)))
+    @Volatile private var running = false
+    private var worker: Thread? = null
+    val ok get() = rec.state == android.media.AudioRecord.STATE_INITIALIZED
+
+    override fun start(enc: VideoEncoder) {
+        val fmt = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, rate, 1).apply {
+            setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            setInteger(MediaFormat.KEY_BIT_RATE, 96_000)
+            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+        }
+        codec.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        codec.start()
+        rec.startRecording()
+        running = true
+        worker = Thread {
+            val info = MediaCodec.BufferInfo()
+            var samples = 0L
+            var eos = false
+            while (true) {
+                if (!eos) {
+                    val i = codec.dequeueInputBuffer(10_000)
+                    if (i >= 0) {
+                        val buf = codec.getInputBuffer(i)!!
+                        buf.clear()
+                        val pts = samples * 1_000_000L / rate
+                        if (!running) {
+                            codec.queueInputBuffer(i, 0, 0, pts, MediaCodec.BUFFER_FLAG_END_OF_STREAM); eos = true
+                        } else {
+                            val n = rec.read(buf, min(buf.capacity(), 8192))
+                            if (n > 0) { codec.queueInputBuffer(i, 0, n, pts, 0); samples += n / 2 } else codec.queueInputBuffer(i, 0, 0, pts, 0)
+                        }
+                    }
+                }
+                var o = codec.dequeueOutputBuffer(info, if (eos) 10_000 else 0)
+                var done = false
+                while (o != MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) enc.onAudioFormat(codec.outputFormat)
+                    else if (o >= 0) {
+                        val ob = codec.getOutputBuffer(o)
+                        if (ob != null && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) enc.writeAudio(ob, info)
+                        codec.releaseOutputBuffer(o, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) { done = true; break }
+                    }
+                    o = codec.dequeueOutputBuffer(info, 0)
+                }
+                if (done) break
+            }
+        }.also { it.start() }
+    }
+
+    override fun finish(enc: VideoEncoder) {
+        running = false
+        worker?.join(3000)
+        runCatching { rec.stop() }; rec.release()
+        runCatching { codec.stop() }; codec.release()
     }
 }
 

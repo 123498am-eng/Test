@@ -59,12 +59,22 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.math.acos
+import kotlin.math.abs
 
 /** 대상(사진/동영상 속 인물) 한 프레임: 사진 + 얼굴 점(사진 좌표) + 얼굴 좌표계. face 가 없으면 얼굴을 못 찾은 프레임. */
 class TargetFrame(val bitmap: Bitmap, val base: FloatArray?, val frame: MeshData.Companion.FaceFrame?)
 
-/** 내 얼굴 움직임: 기준 표정 대비 표정 변화(얼굴 좌표), 고개 회전, 위치 이동(얼굴 높이 단위). */
-class DriverState(val delta: FloatArray, val rot: FloatArray, val tx: Float, val ty: Float)
+/**
+ * 내 얼굴 움직임: 기준 표정 대비 표정 변화(얼굴 좌표, 눈동자 포함 478점), 고개 회전, 위치 이동(얼굴 높이 단위).
+ * mouthFrame/mouthUV: 내 카메라 사진과 그 안의 입 안쪽 테두리 위치 (치아·혀를 대상 입에 옮겨 그릴 때 씀)
+ * tone: 대상 피부 톤에 맞추는 색 배율
+ */
+class DriverState(val delta: FloatArray, val rot: FloatArray, val tx: Float, val ty: Float,
+                  val mouthFrame: Bitmap?, val mouthUV: FloatArray, val tone: FloatArray)
+
+/** 눈동자를 포함한 얼굴 점 수 */
+private const val PTS = 478
 
 /** 입 안쪽 테두리 (윗입술 안쪽 → 아랫입술 안쪽) */
 private val INNER_LIP = intArrayOf(78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95)
@@ -95,6 +105,10 @@ class ReenactActivity : ComponentActivity() {
     private var neutralSum: FloatArray? = null
     private var neutral: FloatArray? = null
     private var neutralFrame: MeshData.Companion.FaceFrame? = null
+    private var sDelta: FloatArray? = null
+    private var sRot: FloatArray? = null
+    private var sTx = 0f; private var sTy = 0f
+    @Volatile var targetTone: FloatArray? = null // 대상 피부 평균색 (화면 쪽에서 계산)
 
     // 녹화
     private var encoder: VideoEncoder? = null
@@ -103,6 +117,8 @@ class ReenactActivity : ComponentActivity() {
     private val pending = java.util.concurrent.atomic.AtomicInteger(0)
 
     private val pick = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) onPicked(uri) }
+    private var askedMic = false
+    private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { toggleRecord() }
     private val askCamera = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) startLive() else info.text = "카메라 권한이 필요합니다" }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -210,7 +226,13 @@ class ReenactActivity : ComponentActivity() {
         fun btn(t: String, f: (Button) -> Unit) = Button(this).apply { text = t; textSize = 12f; setOnClickListener { f(this) } }
             .also { bar.addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)) }
         btn("기준 표정 다시") { recalibrate = true }
-        recBtn = btn("녹화") { toggleRecord() }
+        renderer.onTargetTone = { t -> targetTone = t }
+        recBtn = btn("녹화") {
+            // 처음 녹화할 때 마이크 권한을 물어봅니다 (거절하면 소리 없이 녹화)
+            if (encoder == null && recOut == null && ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED && !askedMic) {
+                askedMic = true; askMic.launch(Manifest.permission.RECORD_AUDIO)
+            } else toggleRecord()
+        }
         btn("닫기") { stopLive(); showPicker() }
         bottom.addView(bar)
         root.addView(bottom, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT, Gravity.BOTTOM))
@@ -228,7 +250,8 @@ class ReenactActivity : ComponentActivity() {
                     ?: return TargetFrame(b, null, null)
                 val pts = FloatArray(f.size * 3)
                 f.forEachIndexed { i, p -> pts[i * 3] = p.x(); pts[i * 3 + 1] = p.y(); pts[i * 3 + 2] = p.z() }
-                val base = MeshData.imageBase(pts, b.width.toFloat(), b.height.toFloat())
+                if (f.size < PTS) return TargetFrame(b, null, null)
+                val base = MeshData.imageBase(pts, b.width.toFloat(), b.height.toFloat(), PTS)
                 return TargetFrame(b, base, MeshData.faceFrame(base))
             }
             try {
@@ -296,11 +319,10 @@ class ReenactActivity : ComponentActivity() {
             val ts = max(SystemClock.uptimeMillis(), lastTs + 1).also { lastTs = it }
             val f = lm.detectForVideo(BitmapImageBuilder(bmp).build(), ts).faceLandmarks().firstOrNull()
             val w = bmp.width.toFloat(); val h = bmp.height.toFloat()
-            bmp.recycle()
-            if (f == null) { setInfo("카메라에 얼굴이 보이지 않습니다"); return }
+            if (f == null || f.size < PTS) { bmp.recycle(); setInfo("카메라에 얼굴이 보이지 않습니다"); return }
             val pts = FloatArray(f.size * 3)
             f.forEachIndexed { i, p -> pts[i * 3] = p.x(); pts[i * 3 + 1] = p.y(); pts[i * 3 + 2] = p.z() }
-            val base = MeshData.imageBase(pts, w, h)
+            val base = MeshData.imageBase(pts, w, h, PTS)
             val fr = MeshData.faceFrame(base)
             val front = MeshData.frontal(base, fr)
 
@@ -314,7 +336,9 @@ class ReenactActivity : ComponentActivity() {
                 if (calib >= 15) {
                     neutral = FloatArray(sum.size) { sum[it] / calib }
                     neutralFrame = fr
+                    sDelta = null; sRot = null; sTx = 0f; sTy = 0f
                 }
+                bmp.recycle()
                 return
             }
             val nf = neutralFrame!!
@@ -327,15 +351,61 @@ class ReenactActivity : ComponentActivity() {
                 for (k in 0..2) s += now[k][r] * ref[k][c]
                 rot[r * 3 + c] = s
             }
+            clampRotation(rot, 35f) // 고개를 너무 크게 돌리면 사진이 찢어지므로 35°까지
             val tx = ((fr.c[0] - nf.c[0]) / nf.faceH).coerceIn(-0.3f, 0.3f)
             val ty = ((fr.c[1] - nf.c[1]) / nf.faceH).coerceIn(-0.3f, 0.3f)
-            renderer.driver.set(DriverState(delta, rot, tx, ty))
+            // 떨림 줄이기: 빠른 움직임은 빨리, 작은 떨림은 천천히 따라가는 부드러운 필터
+            val sd = sDelta; val sr = sRot
+            if (sd == null || sr == null) { sDelta = delta.copyOf(); sRot = rot.copyOf(); sTx = tx; sTy = ty }
+            else {
+                for (k in sd.indices) { val diff = delta[k] - sd[k]; val a = (0.35f + abs(diff) * 8f).coerceAtMost(1f); sd[k] += diff * a }
+                for (k in sr.indices) sr[k] += (rot[k] - sr[k]) * 0.6f
+                sTx += (tx - sTx) * 0.6f; sTy += (ty - sTy) * 0.6f
+            }
+            // 입 안쪽: 내 사진에서 입 테두리 위치와 피부 평균색 (대상 피부 톤에 맞추려고)
+            val mUV = FloatArray(INNER_LIP.size * 2)
+            INNER_LIP.forEachIndexed { k, i -> mUV[k * 2] = pts[i * 3]; mUV[k * 2 + 1] = pts[i * 3 + 1] }
+            val mine = skinTone(bmp, pts)
+            val tgt = targetTone
+            val tone = if (tgt != null && mine != null) FloatArray(3) { (tgt[it] / mine[it].coerceAtLeast(1f)).coerceIn(0.6f, 1.6f) } else floatArrayOf(1f, 1f, 1f)
+            val small = Bitmap.createScaledBitmap(bmp, (w / 2).toInt(), (h / 2).toInt(), true) // 입속 텍스처는 절반 크기면 충분
+            bmp.recycle()
+            renderer.driver.set(DriverState(sDelta!!.copyOf(), sRot!!.copyOf(), sTx, sTy, small, mUV, tone))
             setInfo(if (encoder != null) "녹화 중 · 표정과 고개 움직임을 따라 합니다" else "표정과 고개 움직임을 따라 합니다")
         } catch (e: Exception) {
             setInfo("오류: ${e.message}")
         } finally {
             img.close()
         }
+    }
+
+    /** 볼·이마 몇 군데의 평균색 (RGB) */
+    private fun skinTone(b: Bitmap, pts: FloatArray): FloatArray? {
+        val idx = intArrayOf(50, 280, 151, 101, 330)
+        val sum = FloatArray(3); var n = 0
+        for (i in idx) {
+            val x = (pts[i * 3] * b.width).toInt(); val y = (pts[i * 3 + 1] * b.height).toInt()
+            if (x !in 0 until b.width || y !in 0 until b.height) continue
+            val c = b.getPixel(x, y)
+            sum[0] += Color.red(c).toFloat(); sum[1] += Color.green(c).toFloat(); sum[2] += Color.blue(c).toFloat(); n++
+        }
+        return if (n == 0) null else FloatArray(3) { sum[it] / n }
+    }
+
+    /** 회전 각도가 maxDeg 를 넘으면 같은 축으로 maxDeg 까지만 (로드리게스 공식) */
+    private fun clampRotation(r: FloatArray, maxDeg: Float) {
+        val cosT = ((r[0] + r[4] + r[8] - 1f) / 2f).coerceIn(-1f, 1f)
+        val t = acos(cosT)
+        val maxT = Math.toRadians(maxDeg.toDouble()).toFloat()
+        if (t <= maxT || t < 1e-4f) return
+        var ax = r[7] - r[5]; var ay = r[2] - r[6]; var az = r[3] - r[1]
+        val l = sqrt(ax * ax + ay * ay + az * az).coerceAtLeast(1e-6f); ax /= l; ay /= l; az /= l
+        val c = cos(maxT); val s = sin(maxT); val v = 1 - c
+        val m = floatArrayOf(
+            c + ax * ax * v, ax * ay * v - az * s, ax * az * v + ay * s,
+            ay * ax * v + az * s, c + ay * ay * v, ay * az * v - ax * s,
+            az * ax * v - ay * s, az * ay * v + ax * s, c + az * az * v)
+        m.copyInto(r)
     }
 
     private var lastInfo = ""
@@ -349,7 +419,13 @@ class ReenactActivity : ComponentActivity() {
             val (w, h) = VideoEncoder.fitSize(gv.width, gv.height, 960)
             val out = MediaSave.newVideo(this, "ai_edit_${System.currentTimeMillis()}.mp4")
             recOut = out
-            encExec.execute { runCatching { encoder = VideoEncoder(out.pfd.fileDescriptor, w, h, 20) }.onFailure { e -> runOnUiThread { info.text = "녹화를 시작할 수 없습니다: ${e.message}" } } }
+            val micOk = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            encExec.execute {
+                runCatching {
+                    val mic = if (micOk) runCatching { MicAudio().takeIf { it.ok } }.getOrNull() else null
+                    encoder = VideoEncoder(out.pfd.fileDescriptor, w, h, 20, mic)
+                }.onFailure { e -> runOnUiThread { info.text = "녹화를 시작할 수 없습니다: ${e.message}" } }
+            }
             recStart = SystemClock.uptimeMillis()
             renderer.onCapture = { bmp -> captureFrame(bmp, w, h) }
             recBtn?.text = "녹화 중지"
@@ -411,6 +487,10 @@ class WarpRenderer : GLSurfaceView.Renderer {
     val driver = AtomicReference<DriverState?>()
     @Volatile var gain = 1f
     @Volatile var onCapture: ((Bitmap) -> Unit)? = null
+    @Volatile var onTargetTone: ((FloatArray) -> Unit)? = null
+    private var drvTex = 0
+    private var drvShown: DriverState? = null
+    private var innerCount = 0 // 고정 점 중 앞쪽 innerCount 개는 "머리 둘레 고리": 고개와 함께 움직임
     private val pendingTarget = AtomicReference<Pair<TargetFrame, Boolean>?>()
     private var cur: TargetFrame? = null
     private var curKeep = false
@@ -428,6 +508,7 @@ class WarpRenderer : GLSurfaceView.Renderer {
     private var vw = 1; private var vh = 1
     private var posBuf: FloatBuffer? = null; private var uvBuf: FloatBuffer? = null
     private val mouthBuf = ByteBuffer.allocateDirect((INNER_LIP.size + 2) * 3 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    private val mouthUvBuf = ByteBuffer.allocateDirect((INNER_LIP.size + 2) * 2 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
 
     fun postTarget(t: TargetFrame, keep: Boolean) {
         pendingTarget.getAndSet(t to keep)?.let { (old, k) -> if (!k) old.bitmap.recycle() }
@@ -439,16 +520,20 @@ class WarpRenderer : GLSurfaceView.Renderer {
         GLES20.glAttachShader(prog, sh(GLES20.GL_VERTEX_SHADER,
             "attribute vec3 aPos; attribute vec2 aUV; varying vec2 vUV; void main(){ vUV=aUV; gl_Position=vec4(aPos,1.0); }"))
         GLES20.glAttachShader(prog, sh(GLES20.GL_FRAGMENT_SHADER,
-            "precision mediump float; uniform sampler2D uTex; uniform int uFill; uniform vec4 uColor; varying vec2 vUV;" +
-                "void main(){ gl_FragColor = uFill == 1 ? uColor : texture2D(uTex, vUV); }"))
+            "precision mediump float; uniform sampler2D uTex; uniform sampler2D uDrv; uniform int uFill; uniform vec4 uColor; uniform vec3 uTone; varying vec2 vUV;" +
+                "void main(){ if (uFill == 1) gl_FragColor = uColor; else if (uFill == 2) gl_FragColor = vec4(clamp(texture2D(uDrv, vUV).rgb * uTone, 0.0, 1.0), 1.0); else gl_FragColor = texture2D(uTex, vUV); }"))
         GLES20.glLinkProgram(prog)
-        val ids = IntArray(1); GLES20.glGenTextures(1, ids, 0); tex = ids[0]
+        val ids = IntArray(2); GLES20.glGenTextures(2, ids, 0); tex = ids[0]; drvTex = ids[1]
+        for (id in ids) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, id)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        }
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
         cur?.let { GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, it.bitmap, 0) }
+        drvShown = null
         GLES20.glClearColor(0.07f, 0.07f, 0.08f, 1f)
     }
 
@@ -460,16 +545,23 @@ class WarpRenderer : GLSurfaceView.Renderer {
         val w = t.bitmap.width.toFloat(); val h = t.bitmap.height.toFloat()
         meshW = t.bitmap.width; meshH = t.bitmap.height
         val pts = ArrayList<FloatArray>()
-        for (i in 0 until 468) pts += floatArrayOf(base[i * 3], -base[i * 3 + 1])
-        // 얼굴 둘레 고리 (얼굴 크기의 약 1.45배 타원) — 여기부터 바깥은 움직이지 않음
+        for (i in 0 until PTS) pts += floatArrayOf(base[i * 3], -base[i * 3 + 1])
         var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
         for (i in 0 until 468) { minX = min(minX, pts[i][0]); maxX = max(maxX, pts[i][0]); minY = min(minY, pts[i][1]); maxY = max(maxY, pts[i][1]) }
         val cx = (minX + maxX) / 2; val cy = (minY + maxY) / 2
-        val rx = (maxX - minX) * 0.75f; val ry = (maxY - minY) * 0.72f
         val fixed = ArrayList<FloatArray>()
+        // 1) 머리 둘레 고리: 머리카락·귀까지 감싸며 고개와 함께 움직임 (얼굴만 움직이고 머리카락은 그대로인 어색함을 줄임)
+        val ix = (maxX - minX) * 0.82f; val iy = (maxY - minY) * 0.80f
+        for (k in 0 until 24) {
+            val a = (k * 2 * Math.PI / 24).toFloat()
+            fixed += floatArrayOf((cx + ix * cos(a)).coerceIn(0f, w - 1), (cy - (maxY - minY) * 0.08f + iy * sin(a)).coerceIn(0f, h - 1))
+        }
+        innerCount = fixed.size
+        // 2) 바깥 고리: 움직이지 않음 (배경은 그대로)
+        val ox = (maxX - minX) * 1.6f; val oy = (maxY - minY) * 1.45f
         for (k in 0 until 28) {
             val a = (k * 2 * Math.PI / 28).toFloat()
-            fixed += floatArrayOf((cx + rx * cos(a)).coerceIn(0f, w - 1), (cy + ry * sin(a)).coerceIn(0f, h - 1))
+            fixed += floatArrayOf((cx + ox * cos(a)).coerceIn(0f, w - 1), (cy + oy * sin(a)).coerceIn(0f, h - 1))
         }
         for (k in 0..4) { val f = k / 4f; fixed += floatArrayOf(f * (w - 1), 0f); fixed += floatArrayOf(f * (w - 1), h - 1) }
         for (k in 1..3) { val f = k / 4f; fixed += floatArrayOf(0f, f * (h - 1)); fixed += floatArrayOf(w - 1, f * (h - 1)) }
@@ -505,6 +597,17 @@ class WarpRenderer : GLSurfaceView.Renderer {
             cur?.let { if (!curKeep && it !== t) it.bitmap.recycle() }
             cur = t; curKeep = keep
             if (t.base != null && (tris == null || t.bitmap.width != meshW || t.bitmap.height != meshH)) buildMesh(t)
+            t.base?.let { b ->
+                // 대상 피부 평균색 (내 입속 색을 대상 톤에 맞추려고)
+                val sum = FloatArray(3); var cnt = 0
+                for (i in intArrayOf(50, 280, 151, 101, 330)) {
+                    val x = b[i * 3].toInt(); val y = (-b[i * 3 + 1]).toInt()
+                    if (x in 0 until t.bitmap.width && y in 0 until t.bitmap.height) {
+                        val c = t.bitmap.getPixel(x, y); sum[0] += Color.red(c).toFloat(); sum[1] += Color.green(c).toFloat(); sum[2] += Color.blue(c).toFloat(); cnt++
+                    }
+                }
+                if (cnt > 0) onTargetTone?.invoke(FloatArray(3) { sum[it] / cnt })
+            }
             // 대상의 평소 얼굴 모양: 처음 10프레임 평균 (동영상 속 인물의 원래 표정 대신 내 표정을 씁니다)
             if (t.base != null && t.frame != null && identityN < 10) {
                 val f = MeshData.frontal(t.base, t.frame)
@@ -545,7 +648,7 @@ class WarpRenderer : GLSurfaceView.Renderer {
 
         // 얼굴 점 옮기기: 대상 평소 모양 + 내 표정 변화 → 내 고개 회전 → 대상 사진 좌표
         val d = driver.get()
-        val n = 468; val nFixed = fixed.size / 2
+        val n = PTS; val nFixed = fixed.size / 2
         val pos = FloatArray((n + nFixed) * 3); val uv = FloatArray((n + nFixed) * 2)
         // 깊이: 카메라에 가까운 면이 앞에 오도록 (메시가 접혀도 겹쳐 보이지 않게)
         fun depth(pz: Float) = (-(pz - fr.c[2]) / (fr.faceH * 2f)).coerceIn(-0.6f, 0.6f)
@@ -567,7 +670,15 @@ class WarpRenderer : GLSurfaceView.Renderer {
         }
         for (j in 0 until nFixed) {
             val x = fixed[j * 2]; val y = fixed[j * 2 + 1]
-            pos[(n + j) * 3] = nx(x); pos[(n + j) * 3 + 1] = ny(y); pos[(n + j) * 3 + 2] = 0.9f
+            var px = x; var py = y
+            if (j < innerCount && d != null) {
+                // 머리 둘레 고리: 얼굴 중심 평면에서 고개 회전·이동을 그대로 적용
+                val r = d.rot
+                val ox = x - fr.c[0]; val oy = -y - fr.c[1]
+                px = fr.c[0] + r[0] * ox + r[1] * oy + d.tx * fr.faceH * 0.8f
+                py = -(fr.c[1] + r[3] * ox + r[4] * oy + d.ty * fr.faceH * 0.8f)
+            }
+            pos[(n + j) * 3] = nx(px); pos[(n + j) * 3 + 1] = ny(py); pos[(n + j) * 3 + 2] = if (j < innerCount) 0.7f else 0.9f
             uv[(n + j) * 2] = x / iw; uv[(n + j) * 2 + 1] = y / ih
         }
         val pb = fill(posBuf, pos).also { posBuf = it }
@@ -580,8 +691,30 @@ class WarpRenderer : GLSurfaceView.Renderer {
         mouthBuf.position(0); mouthBuf.put(mcx); mouthBuf.put(mcy); mouthBuf.put(mz)
         for (i in INNER_LIP) { mouthBuf.put(pos[i * 3]); mouthBuf.put(pos[i * 3 + 1]); mouthBuf.put(mz) }
         mouthBuf.put(pos[INNER_LIP[0] * 3]); mouthBuf.put(pos[INNER_LIP[0] * 3 + 1]); mouthBuf.put(mz); mouthBuf.position(0)
-        GLES20.glUniform1i(uFill, 1); GLES20.glUniform4f(uColor, 0.16f, 0.05f, 0.06f, 1f)
-        GLES20.glDisableVertexAttribArray(aUV)
+        val mf = d?.mouthFrame
+        if (d != null && mf != null && !mf.isRecycled) {
+            // 내 입속(치아·혀)을 대상 입 모양에 맞춰 옮겨 그림, 색은 대상 피부 톤에 맞춤
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1); GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, drvTex)
+            if (drvShown !== d) {
+                GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, mf, 0)
+                drvShown?.mouthFrame?.let { if (it !== mf) it.recycle() }
+                drvShown = d
+            }
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glUniform1i(GLES20.glGetUniformLocation(prog, "uDrv"), 1)
+            GLES20.glUniform3f(GLES20.glGetUniformLocation(prog, "uTone"), d.tone[0], d.tone[1], d.tone[2])
+            var ucx = 0f; var ucy = 0f
+            for (k in INNER_LIP.indices) { ucx += d.mouthUV[k * 2]; ucy += d.mouthUV[k * 2 + 1] }
+            ucx /= INNER_LIP.size; ucy /= INNER_LIP.size
+            mouthUvBuf.position(0); mouthUvBuf.put(ucx); mouthUvBuf.put(ucy)
+            for (k in INNER_LIP.indices) { mouthUvBuf.put(d.mouthUV[k * 2]); mouthUvBuf.put(d.mouthUV[k * 2 + 1]) }
+            mouthUvBuf.put(d.mouthUV[0]); mouthUvBuf.put(d.mouthUV[1]); mouthUvBuf.position(0)
+            GLES20.glUniform1i(uFill, 2)
+            GLES20.glEnableVertexAttribArray(aUV); GLES20.glVertexAttribPointer(aUV, 2, GLES20.GL_FLOAT, false, 0, mouthUvBuf)
+        } else {
+            GLES20.glUniform1i(uFill, 1); GLES20.glUniform4f(uColor, 0.16f, 0.05f, 0.06f, 1f)
+            GLES20.glDisableVertexAttribArray(aUV)
+        }
         GLES20.glEnableVertexAttribArray(aPos); GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 0, mouthBuf)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_FAN, 0, INNER_LIP.size + 2)
 
