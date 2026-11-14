@@ -365,6 +365,24 @@ object Cutout {
     }
 
     /**
+     * 사람 분할을 사각형 주변(25% 넓힘)만 잘라서 돌립니다. 사진 전체를 넣으면 작게 나온 사람은
+     * 모델 해상도(256×256)에서 너무 작아져 다리·팔·머리를 놓치기 때문입니다. 결과는 사진 전체 크기(바깥은 0).
+     */
+    private fun personConfCrop(ps: ImageSegmenter, img: Bitmap, r: RectF): Mat? {
+        val ex = r.width() * 0.25f; val ey = r.height() * 0.25f
+        val x0 = (r.left - ex).toInt().coerceIn(0, img.width - 1); val y0 = (r.top - ey).toInt().coerceIn(0, img.height - 1)
+        val x1 = (r.right + ex).toInt().coerceIn(x0 + 1, img.width); val y1 = (r.bottom + ey).toInt().coerceIn(y0 + 1, img.height)
+        val crop = Bitmap.createBitmap(img, x0, y0, x1 - x0, y1 - y0)
+        try {
+            val pc = personConf(ps, crop, x1 - x0, y1 - y0) ?: return null
+            val full = Mat.zeros(img.height, img.width, CvType.CV_32F)
+            pc.copyTo(full.submat(y0, y1, x0, x1))
+            pc.release()
+            return full
+        } finally { if (crop !== img) crop.recycle() }
+    }
+
+    /**
      * 사각형 안에 사람이 있으면: 물체 AI 가 찾은 모양의 윤곽(볼록 껍질) 안에서 "확실히 사람"인 곳을 채웁니다.
      * 물체 AI 는 머리카락·마스크와 얼굴 피부를 따로 보고 얼굴을 지우기도 하는데, 이것으로 막습니다.
      * 또 사람이 아니면서 사각형 밖으로 많이 나간 덩어리(천장 등)는 버립니다.
@@ -387,6 +405,20 @@ object Cutout {
             Core.bitwise_and(comp, half, tmp); val personPart = Core.countNonZero(tmp)
             val inRect = Core.countNonZero(comp.submat(rr))
             if (personPart < area * 0.1 && inRect < area * 0.5) union.setTo(Scalar(0.0), comp)
+        }
+        // 물체 AI 가 찾은 부분과 이어진 사람 영역은 다리·발까지 통째로 살림
+        run {
+            val pl = Mat(); val ps = Mat(); val pcn = Mat()
+            val pn = Imgproc.connectedComponentsWithStats(half, pl, ps, pcn)
+            val pc2 = Mat(); val ov = Mat()
+            for (i in 1 until pn) {
+                val area = ps.get(i, Imgproc.CC_STAT_AREA)[0]
+                Core.compare(pl, Scalar(i.toDouble()), pc2, Core.CMP_EQ)
+                Core.bitwise_and(pc2, union, ov)
+                val o = Core.countNonZero(ov)
+                if (o >= 50 || o >= area * 0.05) Core.bitwise_or(union, pc2, union)
+            }
+            listOf(pl, ps, pcn, pc2, ov).forEach { it.release() }
         }
         // 물체 모양의 볼록 껍질 안에서 확실한 사람 부분을 채움
         val pts = Mat(); Core.findNonZero(union, pts)
@@ -436,12 +468,14 @@ object Cutout {
             keepTouching(union, org.opencv.core.Rect((rect.left * sc).toInt(), (rect.top * sc).toInt(), (rect.width() * sc).toInt().coerceAtLeast(1), (rect.height() * sc).toInt().coerceAtLeast(1)))
             // 사람이면 사람 분할로 빠진 얼굴 등을 채움
             if (person != null) runCatching {
-                personConf(person, small, w, h)?.let { pc ->
+                personConfCrop(person, small, RectF(rect.left * sc, rect.top * sc, rect.right * sc, rect.bottom * sc))?.let { pc ->
                     personFix(union, pc, org.opencv.core.Rect((rect.left * sc).toInt(), (rect.top * sc).toInt(), (rect.width() * sc).toInt().coerceAtLeast(1), (rect.height() * sc).toInt().coerceAtLeast(1)))
                     pc.release()
                 }
             }
             if (Core.countNonZero(union) < w * h / 400) { union.release(); return null }
+            // 마지막 정리: 사각형과 거의 겹치지 않는 덩어리(옆 사람 일부 등)는 버림
+            keepTouching(union, org.opencv.core.Rect((rect.left * sc).toInt(), (rect.top * sc).toInt(), (rect.width() * sc).toInt().coerceAtLeast(1), (rect.height() * sc).toInt().coerceAtLeast(1)))
             fillHoles(union)
             Imgproc.GaussianBlur(union, union, Size(0.0, 0.0), 1.2) // 경계만 부드럽게
             return union
