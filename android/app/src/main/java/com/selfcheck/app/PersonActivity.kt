@@ -130,7 +130,7 @@ class PersonActivity : ComponentActivity() {
                 .build().also { it.surfaceProvider = previewView.surfaceProvider }
             val analysis = ImageAnalysis.Builder()
                 .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio)
-                    .setResolutionStrategy(ResolutionStrategy(Size(1280, 960), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)).build())
+                    .setResolutionStrategy(ResolutionStrategy(Size(1920, 1440), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)).build())
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build()
@@ -149,9 +149,9 @@ class PersonActivity : ComponentActivity() {
         cam.cameraControl.setZoomRatio((z.zoomRatio * f).coerceIn(z.minZoomRatio, z.maxZoomRatio))
     }
 
-    private fun makePose(mode: RunningMode, n: Int, allowGpu: Boolean): PoseLandmarker {
+    private fun makePose(mode: RunningMode, n: Int, allowGpu: Boolean, lite: Boolean = false): PoseLandmarker {
         fun make(d: Delegate) = PoseLandmarker.createFromOptions(this, PoseLandmarker.PoseLandmarkerOptions.builder()
-            .setBaseOptions(BaseOptions.builder().setModelAssetPath("pose_landmarker_full.task").setDelegate(d).build())
+            .setBaseOptions(BaseOptions.builder().setModelAssetPath(if (lite) "pose_landmarker_lite.task" else "pose_landmarker_full.task").setDelegate(d).build())
             .setRunningMode(mode).setNumPoses(n)
             .setMinPoseDetectionConfidence(0.45f).setMinTrackingConfidence(0.45f).build())
         return if (allowGpu) GpuGuard.create(this, "pose", { make(Delegate.GPU) }, { make(Delegate.CPU) }) else make(Delegate.CPU)
@@ -211,52 +211,78 @@ class PersonActivity : ComponentActivity() {
     }
 
     private var frameNo = 0
+    private var tileIdx = 0
     private var lastDet: List<RectF> = emptyList()
+
+    /** 잘라 낸 영역에서 관절 찾기 (가벼운 Lite 모델) → 전체 사진 좌표 */
+    private fun poseInCrop(bmp: Bitmap, r: RectF): Pair<FloatArray, BooleanArray>? {
+        val ex = r.width() * 0.3f; val ey = r.height() * 0.15f
+        val l = (r.left - ex).toInt().coerceIn(0, bmp.width - 2); val t = (r.top - ey).toInt().coerceIn(0, bmp.height - 2)
+        val rr = (r.right + ex).toInt().coerceIn(l + 2, bmp.width); val bb = (r.bottom + ey).toInt().coerceIn(t + 2, bmp.height)
+        if (rr - l < 16 || bb - t < 24) return null
+        val crop = Bitmap.createBitmap(bmp, l, t, rr - l, bb - t)
+        val pc = poseCrop ?: makePose(RunningMode.IMAGE, 1, false, lite = true).also { poseCrop = it }
+        val res = runCatching { pc.detect(BitmapImageBuilder(crop).build()).landmarks().firstOrNull() }.getOrNull()
+        if (crop !== bmp) crop.recycle()
+        res ?: return null
+        val (pts, ok) = convert(res, l.toFloat(), t.toFloat(), (rr - l).toFloat(), (bb - t).toFloat())
+        return if (boxOf(pts, ok) != null) pts to ok else null
+    }
 
     private fun analyze(img: ImageProxy) {
         try {
             val raw = img.toBitmap()
             val m = android.graphics.Matrix().apply { postRotate(img.imageInfo.rotationDegrees.toFloat()); if (front) postScale(-1f, 1f) }
-            val bmp = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, m, true)
+            val bmp = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, m, true) // 고해상도 (1920×1440)
             if (bmp !== raw) raw.recycle()
             val w = bmp.width.toFloat(); val h = bmp.height.toFloat()
             val ts = max(SystemClock.uptimeMillis(), lastTs + 1).also { lastTs = it }
             if (resetCount) { resetCount = false; tracks.clear(); total = 0 }
 
-            // 1) 화면 전체에서 관절 찾기 (최대 5명)
-            val pl = pose ?: makePose(RunningMode.VIDEO, 5, false) /* CPU: 이 화면에서 GPU 로 켜다가 앱이 종료된 기기가 있음 */.also { pose = it }
+            // 화면 전체 분석은 줄인 사진으로 (빠르게)
+            val ds = min(1f, 960f / max(w, h))
+            val small = if (ds < 1f) Bitmap.createScaledBitmap(bmp, (w * ds).toInt(), (h * ds).toInt(), true) else bmp
+
+            // 1) 화면 전체에서 관절 (가까운 사람, 최대 5명)
+            val pl = pose ?: makePose(RunningMode.VIDEO, 5, false).also { pose = it }
             val found = ArrayList<Triple<RectF, FloatArray?, BooleanArray?>>()
-            for (lm in pl.detectForVideo(BitmapImageBuilder(bmp).build(), ts).landmarks()) {
+            for (lm in pl.detectForVideo(BitmapImageBuilder(small).build(), ts).landmarks()) {
                 val (pts, ok) = convert(lm, 0f, 0f, w, h)
                 boxOf(pts, ok)?.let { found += Triple(it, pts, ok) }
             }
-            // 2) 두 프레임에 한 번 물체 인식으로 사람 상자 찾기 (작게 나온 먼 사람)
-            if (frameNo++ % 2 == 0) {
-                val det = detector ?: makeDetector().also { detector = it }
-                lastDet = det.detect(BitmapImageBuilder(bmp).build()).detections().map { RectF(it.boundingBox()) }
+            // 2) 자동 확대: 물체 인식(사람)을 짝수 프레임엔 화면 전체(줄인 사진), 홀수 프레임엔 원래 해상도 조각 하나로
+            val det = detector ?: makeDetector().also { detector = it }
+            val boxes = ArrayList<RectF>()
+            if (frameNo % 2 == 0) {
+                det.detect(BitmapImageBuilder(small).build()).detections().forEach { d -> val b = d.boundingBox(); boxes += RectF(b.left / ds, b.top / ds, b.right / ds, b.bottom / ds) }
+            } else {
+                val grid = tiles(w, h, 0.5f)
+                val tr = grid[tileIdx++ % grid.size]
+                val crop = Bitmap.createBitmap(bmp, tr.left.toInt(), tr.top.toInt(), tr.width().toInt().coerceAtMost(bmp.width - tr.left.toInt()), tr.height().toInt().coerceAtMost(bmp.height - tr.top.toInt()))
+                det.detect(BitmapImageBuilder(crop).build()).detections().forEach { d -> val b = d.boundingBox(); boxes += RectF(b.left + tr.left, b.top + tr.top, b.right + tr.left, b.bottom + tr.top) }
+                crop.recycle()
             }
-            // 3) 관절을 못 찾은 사람 상자는 그 부분을 확대해서 관절을 다시 찾음 (최대 3명)
-            val pc = poseCrop ?: makePose(RunningMode.IMAGE, 1, false).also { poseCrop = it }
+            frameNo++
+            // 이전 결과와 합쳐서 (조각은 돌아가며 보므로) 잠시 기억
+            val merged = ArrayList<RectF>()
+            for (r in boxes + lastDet) if (merged.none { iou(it, r) > 0.4f }) merged += r
+            lastDet = boxes.ifEmpty { lastDet.filter { d -> tracks.any { iou(it.rect, d) > 0.3f } } }
+            // 3) 관절을 못 찾은 사람 상자는 원래 해상도로 잘라서 관절 찾기 (최대 4명)
             var cropped = 0
-            for (r in lastDet.sortedByDescending { it.height() }) {
+            for (r in merged.sortedByDescending { it.height() }) {
                 if (found.any { iou(it.first, r) > 0.3f }) continue
-                if (cropped < 3 && r.height() > 24) {
-                    val ex = r.width() * 0.25f; val ey = r.height() * 0.15f
-                    val l = (r.left - ex).toInt().coerceIn(0, bmp.width - 2); val t = (r.top - ey).toInt().coerceIn(0, bmp.height - 2)
-                    val rr = (r.right + ex).toInt().coerceIn(l + 2, bmp.width); val bb = (r.bottom + ey).toInt().coerceIn(t + 2, bmp.height)
-                    val crop = Bitmap.createBitmap(bmp, l, t, rr - l, bb - t)
-                    val res = runCatching { pc.detect(BitmapImageBuilder(crop).build()).landmarks().firstOrNull() }.getOrNull()
-                    crop.recycle(); cropped++
-                    if (res != null) {
-                        val (pts, ok) = convert(res, l.toFloat(), t.toFloat(), (rr - l).toFloat(), (bb - t).toFloat())
-                        if (boxOf(pts, ok) != null) { found += Triple(RectF(r), pts, ok); continue }
-                    }
-                }
-                found += Triple(RectF(r), null, null) // 관절 없이 상자만
+                val res = if (cropped < 4) { cropped++; poseInCrop(bmp, r) } else null
+                found += if (res != null) Triple(RectF(r), res.first, res.second) else Triple(RectF(r), null, null)
             }
+            // 4) 이미 추적 중인 작은(먼) 사람은 이번 프레임에 못 찾았어도 그 자리를 다시 확대해서 봄 (찾았을 때만 유지)
+            for (t in tracks) {
+                if (cropped >= 6 || t.rect.height() > h * 0.5f || found.any { iou(it.first, t.rect) > 0.3f }) continue
+                cropped++
+                poseInCrop(bmp, t.rect)?.let { (pts, ok) -> boxOf(pts, ok)?.let { b -> found += Triple(b, pts, ok) } }
+            }
+            if (small !== bmp) small.recycle()
             bmp.recycle()
-
-            // 4) 번호 붙이기 (추적), 상자는 부드럽게, 3프레임 이상 보이면 누적 인원에 셈
+            // 5) 번호 붙이기 (추적), 상자는 부드럽게, 3프레임 이상 보이면 누적 인원에 셈
             val now = ts
             val used = HashSet<PersonTrack>()
             val people = ArrayList<PersonInfo>()

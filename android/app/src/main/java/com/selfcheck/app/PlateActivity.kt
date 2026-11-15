@@ -84,6 +84,7 @@ class PlateActivity : ComponentActivity() {
     private var torch = false
     private val tracks = mutableListOf<PlateTrack>()
     private var frameNo = 0
+    private var tileIdx = 0
     /** 확정된 번호판 목록 (UI 스레드와 분석 스레드가 함께 씀) */
     private val found = LinkedHashMap<String, PlateEntry>()
 
@@ -151,10 +152,10 @@ class PlateActivity : ComponentActivity() {
             val ratio = AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
             val preview = Preview.Builder().setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio).build())
                 .build().also { it.surfaceProvider = previewView.surfaceProvider }
-            // 글자를 읽으려면 해상도가 높아야 해서 1280×960
+            // 자동 확대: 1920×1440 고해상도로 받아 두고, 조각·번호판 부분을 원래 해상도로 잘라 읽음
             val analysis = ImageAnalysis.Builder()
                 .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio)
-                    .setResolutionStrategy(ResolutionStrategy(Size(1280, 960), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)).build())
+                    .setResolutionStrategy(ResolutionStrategy(Size(1920, 1440), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)).build())
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build()
@@ -203,15 +204,35 @@ class PlateActivity : ComponentActivity() {
             val now = System.currentTimeMillis()
             val w = bmp.width.toFloat(); val h = bmp.height.toFloat()
 
-            // 1) 화면 전체  2) 두 프레임에 한 번은 가운데를 2배로 키워서 (먼 번호판)
-            val cands = ArrayList<Pair<RectF, String>>(findPlates(bmp, 0f, 0f, 1f))
-            if (frameNo++ % 2 == 1) {
-                val cw = (w * 0.5f).toInt(); val ch = (h * 0.4f).toInt()
-                val cx = ((w - cw) / 2).toInt(); val cy = ((h - ch) / 2).toInt()
-                val crop = Bitmap.createBitmap(bmp, cx, cy, cw, ch)
-                val up = Bitmap.createScaledBitmap(crop, cw * 2, ch * 2, true)
-                cands += findPlates(up, cx.toFloat(), cy.toFloat(), 2f)
-                if (up !== crop) up.recycle(); crop.recycle()
+            val cands = ArrayList<Pair<RectF, String>>()
+            if (frameNo % 2 == 0) {
+                // 1) 짝수 프레임: 화면 전체를 줄여서 (가까운 번호판, 빠르게)
+                val ds = min(1f, 1280f / max(w, h))
+                val small = if (ds < 1f) Bitmap.createScaledBitmap(bmp, (w * ds).toInt(), (h * ds).toInt(), true) else bmp
+                cands += findPlates(small, 0f, 0f, ds)
+                if (small !== bmp) small.recycle()
+            } else {
+                // 2) 홀수 프레임: 화면을 나눈 조각 하나를 원래 해상도로 (확대한 것과 같은 효과, 먼 번호판)
+                val grid = tiles(w, h, 0.5f)
+                val tr = grid[tileIdx++ % grid.size]
+                val tw = tr.width().toInt().coerceAtMost(bmp.width - tr.left.toInt()); val th = tr.height().toInt().coerceAtMost(bmp.height - tr.top.toInt())
+                val crop = Bitmap.createBitmap(bmp, tr.left.toInt(), tr.top.toInt(), tw, th)
+                cands += findPlates(crop, tr.left, tr.top, 1f)
+                crop.recycle()
+            }
+            frameNo++
+            // 3) 아직 확정 안 된 번호판은 그 부분만 잘라 크게 키워서 다시 읽음 (최대 2개)
+            tracks.filter { it.confirmed == null && now - it.lastSeen < 800 }.sortedBy { it.rect.width() }.take(2).forEach { t ->
+                val r = t.rect
+                val ex = r.width() * 0.4f; val ey = r.height() * 0.8f
+                val l = (r.left - ex).toInt().coerceIn(0, bmp.width - 2); val tp = (r.top - ey).toInt().coerceIn(0, bmp.height - 2)
+                val rr = (r.right + ex).toInt().coerceIn(l + 2, bmp.width); val bb = (r.bottom + ey).toInt().coerceIn(tp + 2, bmp.height)
+                val crop = Bitmap.createBitmap(bmp, l, tp, rr - l, bb - tp)
+                val up = 640f / crop.width
+                val big = if (up > 1.05f) Bitmap.createScaledBitmap(crop, 640, (crop.height * up).toInt().coerceAtLeast(1), true) else crop
+                val sc = big.width.toFloat() / crop.width
+                cands += findPlates(big, l.toFloat(), tp.toFloat(), sc)
+                if (big !== crop) big.recycle(); crop.recycle()
             }
             bmp.recycle()
 

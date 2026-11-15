@@ -122,7 +122,7 @@ private class FaceTrack(val id: Int, var rect: RectF, now: Long) {
 
 /** 화면을 덮는 겹치는 정사각형 조각들 (한 변 = 짧은 변 × frac, 간격 75%). */
 private val tileCache = HashMap<Triple<Int, Int, Float>, List<RectF>>()
-private fun tiles(w: Float, h: Float, frac: Float): List<RectF> = synchronized(tileCache) {
+internal fun tiles(w: Float, h: Float, frac: Float): List<RectF> = synchronized(tileCache) {
     tileCache.getOrPut(Triple(w.toInt(), h.toInt(), frac)) {
         val s = min(w, h) * frac
         fun starts(len: Float): List<Float> {
@@ -178,6 +178,8 @@ class LiveActivity : ComponentActivity() {
     private var roiLandmarker: FaceLandmarker? = null // 원거리: 잘라 낸 영역용
     private val tracks = mutableListOf<FaceTrack>()
     private var nextId = 1
+    private var small: Bitmap? = null
+    private var smallScale = 1f
     private var tileA = 0 // 큰 조각(가로 45%) 순서
     private var tileB = 0 // 작은 조각(가로 25%) 순서
     private var roiDetector: ObjectDetector? = null
@@ -324,7 +326,7 @@ class LiveActivity : ComponentActivity() {
             val analysis = ImageAnalysis.Builder()
                 .setResolutionSelector(ResolutionSelector.Builder()
                     .setAspectRatioStrategy(ratio)
-                    .setResolutionStrategy(ResolutionStrategy(if (longRange) Size(1280, 960) else Size(640, 480),
+                    .setResolutionStrategy(ResolutionStrategy(if (longRange) Size(1920, 1440) else Size(640, 480),
                         ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
                     .build())
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -421,7 +423,12 @@ class LiveActivity : ComponentActivity() {
                 tracks.clear(); objTracks.clear()
             }
 
+            // 화면 전체 분석용 줄인 사진 (빠르게) — 조각·정밀 추적·3D 텍스처는 고해상도 원본 사용 (자동 확대)
+            val ds = min(1f, 960f / max(bmp.width, bmp.height))
+            small = if (ds < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * ds).toInt(), (bmp.height * ds).toInt(), true) else bmp
+            smallScale = ds
             val frame = if (productMode) analyzeProducts(bmp, ts) else analyzeFaces(bmp, ts)
+            small?.let { if (it !== bmp) it.recycle() }; small = null
             bmp.recycle()
             renderer.post(frame)
             overlay.post(frame)
@@ -454,7 +461,7 @@ class LiveActivity : ComponentActivity() {
 
         // 1) 화면 전체
         val all = mutableListOf<FaceDet>()
-        lm.detectForVideo(BitmapImageBuilder(bmp).build(), ts).faceLandmarks().forEach { all += toDet(it, 0f, 0f, w, h, 0) }
+        lm.detectForVideo(BitmapImageBuilder(small ?: bmp).build(), ts).faceLandmarks().forEach { all += toDet(it, 0f, 0f, w, h, 0) }
 
         if (longRange) {
             val roi = roiLandmarker ?: FaceMesh.createRoi(this).also { roiLandmarker = it }
@@ -571,11 +578,13 @@ class LiveActivity : ComponentActivity() {
 
     private fun analyzeProducts(bmp: Bitmap, ts: Long): LiveFrame {
         val det = detector ?: createDetector(RunningMode.VIDEO).also { detector = it }
-        val res = det.detectForVideo(BitmapImageBuilder(bmp).build(), ts)
+        val res = det.detectForVideo(BitmapImageBuilder(small ?: bmp).build(), ts)
+        val k = if (small != null) 1f / smallScale else 1f
         val raw = res.detections().mapNotNull { d ->
             val c = d.categories().firstOrNull() ?: return@mapNotNull null
             if (c.categoryName() == "person") return@mapNotNull null // 사람은 제품이 아니므로 제외
-            Triple(RectF(d.boundingBox()), c.categoryName(), c.score())
+            val b = d.boundingBox()
+            Triple(RectF(b.left * k, b.top * k, b.right * k, b.bottom * k), c.categoryName(), c.score())
         }.toMutableList()
         if (longRange) {
             // 원거리: 겹치는 조각 중 하나를 확대해서 작은(먼) 물건도 찾습니다
