@@ -490,7 +490,10 @@ class LiveActivity : ComponentActivity() {
         for ((_, i, t) in pairs) {
             if (i in usedDet || t in usedTrack) continue
             usedDet += i; usedTrack += t
-            t.rect = dets[i].first; t.pts = dets[i].second; t.lastSeen = now; t.frames++; t.far = srcOf[i] > 0
+            val nr = dets[i].first
+            t.rect = RectF(t.rect.left + (nr.left - t.rect.left) * 0.6f, t.rect.top + (nr.top - t.rect.top) * 0.6f,
+                t.rect.right + (nr.right - t.rect.right) * 0.6f, t.rect.bottom + (nr.bottom - t.rect.bottom) * 0.6f) // 흔들림 줄이기
+            t.pts = dets[i].second; t.lastSeen = now; t.frames++; t.far = srcOf[i] > 0
         }
         dets.forEachIndexed { i, (r, pts) ->
             if (i !in usedDet) tracks += FaceTrack(nextId++, r, now).also { it.pts = pts; it.frames = 1; it.far = srcOf[i] > 0; usedTrack += it }
@@ -603,7 +606,11 @@ class LiveActivity : ComponentActivity() {
             if (i in usedDet || t in usedTrack) continue
             usedDet += i; usedTrack += t
             val (r, label, score) = dets[i]
-            t.rect = r; t.label = label; t.score = score; t.lastSeen = now; t.frames++
+            // 상자는 부드럽게 따라감 (흔들림 줄이기), 이름은 확신도가 더 높을 때만 바꿈
+            t.rect.set(t.rect.left + (r.left - t.rect.left) * 0.55f, t.rect.top + (r.top - t.rect.top) * 0.55f,
+                t.rect.right + (r.right - t.rect.right) * 0.55f, t.rect.bottom + (r.bottom - t.rect.bottom) * 0.55f)
+            if (label == t.label || score > t.score + 0.1f) { t.label = label }
+            t.score = t.score * 0.6f + score * 0.4f; t.lastSeen = now; t.frames++
         }
         dets.forEachIndexed { i, (r, label, score) -> if (i !in usedDet) objTracks += ObjTrack(nextObjId++, r, label, score, now) }
         objTracks.removeAll { now - it.lastSeen > ObjTrack.LOST_MS }
@@ -675,10 +682,10 @@ class LiveActivity : ComponentActivity() {
     /** GPU 로 먼저 시도하고, 안 되면 CPU 로. */
     private fun createDetector(mode: RunningMode): ObjectDetector {
         fun make(d: Delegate) = ObjectDetector.createFromOptions(this, ObjectDetector.ObjectDetectorOptions.builder()
-            .setBaseOptions(BaseOptions.builder().setModelAssetPath("efficientdet_lite0.tflite").setDelegate(d).build())
+            .setBaseOptions(BaseOptions.builder().setModelAssetPath("efficientdet_lite2.tflite").setDelegate(d).build())
             .setRunningMode(mode)
             .setMaxResults(5)
-            .setScoreThreshold(0.4f)
+            .setScoreThreshold(0.35f)
             .build())
         return runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
     }
@@ -693,7 +700,7 @@ class LiveActivity : ComponentActivity() {
             val s = (min(w, h) * 0.8f).toInt()
             Rect((w - s) / 2, (h - s) / 2, (w + s) / 2, (h + s) / 2)
         }
-        val sc = min(1f, 768f / max(rect.width(), rect.height()))
+        val sc = min(1f, 1024f / max(rect.width(), rect.height())) // 제품 분석 화질 높임
         val out = Bitmap.createBitmap(max(1, (rect.width() * sc).toInt()), max(1, (rect.height() * sc).toInt()), Bitmap.Config.ARGB_8888)
         Canvas(out).drawBitmap(bmp, rect, Rect(0, 0, out.width, out.height), Paint(Paint.FILTER_BITMAP_FLAG))
         return out
