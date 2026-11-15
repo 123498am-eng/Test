@@ -687,7 +687,7 @@ class LiveActivity : ComponentActivity() {
             .setMaxResults(5)
             .setScoreThreshold(0.35f)
             .build())
-        return runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
+        return GpuGuard.create(this, "detector_${mode.name}", { make(Delegate.GPU) }, { make(Delegate.CPU) })
     }
 
     /** 분석용 사진: 사물 영역(여유 15%), 없으면 화면 가운데. 긴 변 768px. */

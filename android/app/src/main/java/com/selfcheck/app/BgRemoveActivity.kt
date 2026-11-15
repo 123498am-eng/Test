@@ -537,14 +537,14 @@ object Cutout {
         fun make(d: Delegate) = ImageSegmenter.createFromOptions(ctx, ImageSegmenter.ImageSegmenterOptions.builder()
             .setBaseOptions(BaseOptions.builder().setModelAssetPath("selfie_multiclass_256x256.tflite").setDelegate(d).build())
             .setOutputConfidenceMasks(true).setOutputCategoryMask(false).build())
-        runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
+        GpuGuard.create(ctx, "person_seg", { make(Delegate.GPU) }, { make(Delegate.CPU) })
     }.getOrNull()
 
     private fun segmenter(ctx: Context): InteractiveSegmenter {
         fun make(d: Delegate) = InteractiveSegmenter.createFromOptions(ctx, InteractiveSegmenter.InteractiveSegmenterOptions.builder()
             .setBaseOptions(BaseOptions.builder().setModelAssetPath("magic_touch.tflite").setDelegate(d).build())
             .setOutputConfidenceMasks(true).setOutputCategoryMask(false).build())
-        return runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
+        return GpuGuard.create(ctx, "magic_touch", { make(Delegate.GPU) }, { make(Delegate.CPU) })
     }
 
     private fun box(src: Mat, r: Int): Mat { val d = Mat(); Imgproc.boxFilter(src, d, -1, Size(2.0 * r + 1, 2.0 * r + 1)); return d }

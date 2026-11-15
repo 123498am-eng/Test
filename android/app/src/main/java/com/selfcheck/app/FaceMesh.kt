@@ -47,7 +47,7 @@ object FaceMesh {
             .setRunningMode(RunningMode.VIDEO)
             .setNumFaces(5)
             .build())
-        return runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
+        return GpuGuard.create(ctx, "face_fast", { make(Delegate.GPU) }, { make(Delegate.CPU) })
     }
 
     /** 원거리용: 잘라 낸 영역 한 장씩 분석 (IMAGE 모드). */
@@ -58,7 +58,7 @@ object FaceMesh {
             .setNumFaces(3)
             .setMinFaceDetectionConfidence(0.4f)
             .build())
-        return runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
+        return GpuGuard.create(ctx, "face_roi", { make(Delegate.GPU) }, { make(Delegate.CPU) })
     }
 
     fun analyze(ctx: Context, bmp: Bitmap): FaceMeshResult? {

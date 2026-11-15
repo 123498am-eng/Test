@@ -137,6 +137,20 @@ class MainActivity : ComponentActivity() {
         showResults()
 
         WorkManager.getInstance(this).getWorkInfosByTagLiveData(ScanWorker.TAG).observe(this) { infos -> onWork(infos) }
+
+        // 지난번에 앱이 비정상 종료됐다면 원인을 보여 줌 (보내 주시면 고치는 데 도움이 됨)
+        SelfCheckApp.takeCrashReport(this)?.let { report ->
+            android.app.AlertDialog.Builder(this)
+                .setTitle("지난번에 앱이 비정상 종료됐습니다")
+                .setMessage(report)
+                .setPositiveButton("내용 복사") { _, _ ->
+                    getSystemService(android.content.ClipboardManager::class.java)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("오류 내용", report))
+                    toast("복사했습니다")
+                }
+                .setNegativeButton("닫기", null)
+                .show()
+        }
     }
 
     private fun onWork(infos: List<WorkInfo>) {

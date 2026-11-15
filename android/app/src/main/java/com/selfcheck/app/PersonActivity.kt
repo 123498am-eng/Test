@@ -149,12 +149,12 @@ class PersonActivity : ComponentActivity() {
         cam.cameraControl.setZoomRatio((z.zoomRatio * f).coerceIn(z.minZoomRatio, z.maxZoomRatio))
     }
 
-    private fun makePose(mode: RunningMode, n: Int): PoseLandmarker {
+    private fun makePose(mode: RunningMode, n: Int, allowGpu: Boolean): PoseLandmarker {
         fun make(d: Delegate) = PoseLandmarker.createFromOptions(this, PoseLandmarker.PoseLandmarkerOptions.builder()
             .setBaseOptions(BaseOptions.builder().setModelAssetPath("pose_landmarker_full.task").setDelegate(d).build())
             .setRunningMode(mode).setNumPoses(n)
             .setMinPoseDetectionConfidence(0.45f).setMinTrackingConfidence(0.45f).build())
-        return runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
+        return if (allowGpu) GpuGuard.create(this, "pose", { make(Delegate.GPU) }, { make(Delegate.CPU) }) else make(Delegate.CPU)
     }
 
     private fun makeDetector(): ObjectDetector {
@@ -162,7 +162,7 @@ class PersonActivity : ComponentActivity() {
             .setBaseOptions(BaseOptions.builder().setModelAssetPath("efficientdet_lite2.tflite").setDelegate(d).build())
             .setRunningMode(RunningMode.IMAGE).setMaxResults(10).setScoreThreshold(0.35f)
             .setCategoryAllowlist(listOf("person")).build())
-        return runCatching { make(Delegate.GPU) }.getOrElse { make(Delegate.CPU) }
+        return make(Delegate.CPU) // 보조 모델은 CPU (GPU 를 여러 개 동시에 켜면 일부 기기에서 앱이 종료됨)
     }
 
     /** 관절 → (픽셀 좌표, 믿을 만한지) — 보임 0.6 이상이고 존재 0.5 이상일 때만 믿음 */
@@ -224,7 +224,7 @@ class PersonActivity : ComponentActivity() {
             if (resetCount) { resetCount = false; tracks.clear(); total = 0 }
 
             // 1) 화면 전체에서 관절 찾기 (최대 5명)
-            val pl = pose ?: makePose(RunningMode.VIDEO, 5).also { pose = it }
+            val pl = pose ?: makePose(RunningMode.VIDEO, 5, false) /* CPU: 이 화면에서 GPU 로 켜다가 앱이 종료된 기기가 있음 */.also { pose = it }
             val found = ArrayList<Triple<RectF, FloatArray?, BooleanArray?>>()
             for (lm in pl.detectForVideo(BitmapImageBuilder(bmp).build(), ts).landmarks()) {
                 val (pts, ok) = convert(lm, 0f, 0f, w, h)
@@ -236,7 +236,7 @@ class PersonActivity : ComponentActivity() {
                 lastDet = det.detect(BitmapImageBuilder(bmp).build()).detections().map { RectF(it.boundingBox()) }
             }
             // 3) 관절을 못 찾은 사람 상자는 그 부분을 확대해서 관절을 다시 찾음 (최대 3명)
-            val pc = poseCrop ?: makePose(RunningMode.IMAGE, 1).also { poseCrop = it }
+            val pc = poseCrop ?: makePose(RunningMode.IMAGE, 1, false).also { poseCrop = it }
             var cropped = 0
             for (r in lastDet.sortedByDescending { it.height() }) {
                 if (found.any { iou(it.first, r) > 0.3f }) continue
