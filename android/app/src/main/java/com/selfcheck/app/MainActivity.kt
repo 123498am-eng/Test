@@ -107,6 +107,10 @@ class MainActivity : ComponentActivity() {
         }
         root.addView(startBtn, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
 
+        root.addView(button("사람 인식") {
+            startActivity(Intent(this, PersonActivity::class.java))
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
         root.addView(button("번호판 인식") {
             startActivity(Intent(this, PlateActivity::class.java))
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
