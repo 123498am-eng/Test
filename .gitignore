@@ -8,3 +8,8 @@ android/app/build/
 android/local.properties
 android/.kotlin/
 *.apk
+desktop/models/
+desktop/build/
+desktop/dist/
+desktop/*.spec
+*.exe

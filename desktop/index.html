@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>셀프 점검</title>
+<style>
+  :root { --bg:#16171b; --panel:#202228; --line:#2e3139; --text:#e8e9ec; --muted:#9aa0aa; --accent:#2fb6e8; --ok:#3ccf74; --warn:#f0b429; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:"Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; gap:18px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:20px; margin:0 12px 0 0; }
+  nav button { background:none; border:none; color:var(--muted); font-size:15px; padding:8px 10px; cursor:pointer; border-bottom:2px solid transparent; }
+  nav button.on { color:var(--text); border-color:var(--accent); }
+  main { padding:16px 20px; max-width:1200px; margin:auto; }
+  section { display:none; } section.on { display:block; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+  .hint { color:var(--muted); font-size:13px; line-height:1.5; }
+  button.b, label.b { background:#2d3038; color:var(--text); border:1px solid #3a3e48; border-radius:8px; padding:8px 14px; cursor:pointer; font-size:14px; }
+  button.b.pri { background:var(--accent); border-color:var(--accent); color:#04222e; font-weight:bold; }
+  button.b:disabled { opacity:.5; cursor:default; }
+  input[type=text], select { background:#111216; color:var(--text); border:1px solid #3a3e48; border-radius:8px; padding:8px 10px; font-size:14px; }
+  input[type=file] { display:none; }
+  .stage { background:#0e0f12; border:1px solid var(--line); border-radius:10px; min-height:420px; display:flex; align-items:center; justify-content:center; position:relative; overflow:hidden; }
+  .stage canvas, .stage img { max-width:100%; max-height:70vh; display:block; }
+  .checker { background-image:linear-gradient(45deg,#bbb 25%,transparent 25%),linear-gradient(-45deg,#bbb 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#bbb 75%),linear-gradient(-45deg,transparent 75%,#bbb 75%); background-size:20px 20px; background-position:0 0,0 10px,10px -10px,-10px 0; background-color:#ddd; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:12px; } @media (max-width:800px){ .two{grid-template-columns:1fr;} }
+  table { width:100%; border-collapse:collapse; font-size:13px; } td,th { border-bottom:1px solid var(--line); padding:6px; text-align:left; word-break:break-all; }
+  .found { color:var(--ok); font-weight:bold; } .possible { color:var(--warn); } .hit { background:#5a1f1f; }
+  pre.log { background:#0e0f12; border:1px solid var(--line); border-radius:8px; padding:10px; max-height:220px; overflow:auto; font-size:12px; color:#c7cbd3; white-space:pre-wrap; }
+  .slider { display:flex; align-items:center; gap:8px; } .slider span { width:110px; color:var(--muted); font-size:13px; }
+  .swatch { width:34px; height:20px; border:1px solid #555; border-radius:4px; display:inline-block; vertical-align:middle; }
+  .badge { position:absolute; top:10px; left:10px; background:rgba(15,18,26,.85); padding:8px 12px; border-radius:10px; font-size:14px; line-height:1.6; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>셀프 점검</h1>
+  <nav id="nav">
+    <button data-t="check" class="on">셀프 점검</button>
+    <button data-t="bg">배경 제거</button>
+    <button data-t="chroma">크로마키</button>
+    <button data-t="person">사람 인식</button>
+    <button data-t="face">얼굴 인식</button>
+  </nav>
+</header>
+<main>
+
+<!-- 셀프 점검 -->
+<section id="check" class="on">
+  <p class="hint">내 아이디가 255개 사이트에서 쓰이는지 확인하고, 찾은 계정의 프로필 사진을 내 얼굴 사진과 비교해 사칭 의심 계정을 표시합니다. 본인 아이디·본인 사진으로 쓰세요. 얼굴 비교는 이 PC 안에서만 합니다.</p>
+  <div class="row"><input type="text" id="cUser" placeholder="내 아이디 (여러 개는 쉼표로)" style="flex:1;min-width:240px">
+    <label class="b">내 얼굴 사진 고르기<input type="file" id="cPhotos" accept="image/*" multiple></label><span id="cPhotoN" class="hint">사진 없음 (선택)</span>
+    <button class="b pri" id="cRun">점검 시작</button></div>
+  <pre class="log" id="cLog">아이디를 입력하고 '점검 시작'을 누르세요.</pre>
+  <table id="cTable"></table>
+</section>
+
+<!-- 배경 제거 -->
+<section id="bg">
+  <p class="hint">사진을 고른 뒤 남길 물체를 마우스로 끌어 사각형으로 감싸고 '편집'을 누르세요. AI 가 물체(사람이면 사람 분할까지)를 찾아 나머지 배경을 지우고, 경계를 사진에 맞춰 다듬습니다.</p>
+  <div class="row"><label class="b">사진 고르기<input type="file" id="bFile" accept="image/*"></label>
+    <select id="bBack"><option value="transparent">배경: 투명</option><option value="white">흰색</option><option value="black">검정</option><option value="green">초록</option><option value="blur">흐리게</option><option value="image">다른 사진</option></select>
+    <label class="b" id="bBackImgL" style="display:none">배경 사진<input type="file" id="bBackImg" accept="image/*"></label>
+    <button class="b pri" id="bRun">편집</button><a id="bSave" class="b" style="display:none;text-decoration:none">PNG 저장</a><span id="bMsg" class="hint"></span></div>
+  <div class="two"><div class="stage"><canvas id="bCanvas"></canvas></div><div class="stage checker" id="bOutStage"><img id="bOut"></div></div>
+</section>
+
+<!-- 크로마키 -->
+<section id="chroma">
+  <p class="hint">초록·파란 배경에서 찍은 사진을 고르세요. 가장자리에서 배경색을 자동으로 찾고, 왼쪽 사진을 누르면 그 색을 지울 색으로 바꿉니다.</p>
+  <div class="row"><label class="b">사진 고르기<input type="file" id="kFile" accept="image/*"></label>
+    지울 색 <span class="swatch" id="kSw"></span>
+    <select id="kBack"><option value="transparent">배경: 투명</option><option value="white">흰색</option><option value="black">검정</option><option value="image">다른 사진</option></select>
+    <label class="b" id="kBackImgL" style="display:none">배경 사진<input type="file" id="kBackImg" accept="image/*"></label>
+    <button class="b pri" id="kSave">PNG 저장</button><span id="kMsg" class="hint"></span></div>
+  <div class="row">
+    <div class="slider"><span>허용 범위</span><input type="range" id="kTol" min="0" max="120" value="40"></div>
+    <div class="slider"><span>부드러움</span><input type="range" id="kSoft" min="1" max="120" value="30"></div>
+    <div class="slider"><span>색 번짐 제거</span><input type="range" id="kSpill" min="0" max="100" value="60"></div>
+    <div class="slider"><span>가장자리 줄이기</span><input type="range" id="kChoke" min="0" max="8" value="1"></div>
+  </div>
+  <div class="two"><div class="stage"><canvas id="kCanvas" style="cursor:crosshair"></canvas></div><div class="stage checker"><img id="kOut"></div></div>
+</section>
+
+<!-- 사람 인식 -->
+<section id="person">
+  <p class="hint">웹캠에 비친 사람을 찾아 뼈대(관절 33개)와 번호·자세를 표시하고 인원을 셉니다. 작게 나온 먼 사람은 화면을 조각으로 나눠 원래 해상도로 찾습니다(자동 확대). 누구인지 알아내는 기능은 없습니다.</p>
+  <div class="row">카메라 <select id="pCam"><option value="0">0번</option><option value="1">1번</option><option value="2">2번</option></select>
+    <button class="b pri" id="pStart">시작</button><button class="b" id="pStop">중지</button><button class="b" id="pReset">누적 초기화</button><span id="pMsg" class="hint"></span></div>
+  <div class="stage"><canvas id="pCanvas"></canvas><div class="badge" id="pBadge" style="display:none"></div></div>
+</section>
+
+<!-- 얼굴 인식 -->
+<section id="face">
+  <p class="hint">웹캠에 비친 얼굴을 찾아 얼굴 점과 번호를 표시하고 인원을 셉니다. 먼 얼굴도 자동 확대로 찾습니다. 누구인지 알아내는 기능은 없습니다 (번호로만 구분).</p>
+  <div class="row">카메라 <select id="fCam"><option value="0">0번</option><option value="1">1번</option><option value="2">2번</option></select>
+    <button class="b pri" id="fStart">시작</button><button class="b" id="fStop">중지</button><button class="b" id="fReset">누적 초기화</button><span id="fMsg" class="hint"></span></div>
+  <div class="stage"><canvas id="fCanvas"></canvas><div class="badge" id="fBadge" style="display:none"></div></div>
+</section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const post = (url, body) => fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(r => r.json());
+const readFile = f => new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(f); });
+const loadImg = src => new Promise(res => { const i = new Image(); i.onload = () => res(i); i.src = src; });
+
+// 탭
+document.querySelectorAll('#nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#nav button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('main section').forEach(s => s.classList.toggle('on', s.id === b.dataset.t));
+  if (b.dataset.t !== 'person' && b.dataset.t !== 'face') post('/api/camera/stop', {});
+});
+
+// ---------- 셀프 점검
+let cPhotos = [];
+$('cPhotos').onchange = async e => { cPhotos = await Promise.all([...e.target.files].map(readFile)); $('cPhotoN').textContent = `사진 ${cPhotos.length}장`; };
+$('cRun').onclick = async () => {
+  const r = await post('/api/selfcheck', {usernames:$('cUser').value, photos:cPhotos});
+  if (r.error) { alert(r.error); return; }
+  $('cRun').disabled = true; pollCheck();
+};
+async function pollCheck() {
+  const j = await (await fetch('/api/selfcheck')).json();
+  $('cLog').textContent = j.log.join('\n'); $('cLog').scrollTop = 1e9;
+  const label = {found:'있음', possible:'있을 수도', blocked:'확인 불가(차단)', error:'오류'};
+  const rows = j.rows.filter(r => r.status !== 'not_found');
+  $('cTable').innerHTML = '<tr><th>아이디</th><th>사이트</th><th>결과</th><th>주소</th><th>얼굴 유사도</th></tr>' + rows.map(r =>
+    `<tr><td>${r.username}</td><td>${r.site}</td><td class="${r.status}">${label[r.status]||r.status}</td><td><a href="${r.url}" target="_blank" rel="noopener">${r.url}</a></td>` +
+    `<td class="${r.face!=null && r.face>=0.363?'hit':''}">${r.face==null?'-':r.face.toFixed(2)+(r.face>=0.363?' 내 얼굴과 비슷함':'')}</td></tr>`).join('');
+  if (j.running) setTimeout(pollCheck, 1000); else $('cRun').disabled = false;
+}
+
+// ---------- 공통: 사진을 캔버스에 맞춰 그리기
+function fitCanvas(cv, img, maxW = 560, maxH = 520) {
+  const s = Math.min(1, maxW / img.width, maxH / img.height);
+  cv.width = Math.round(img.width * s); cv.height = Math.round(img.height * s);
+  cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+  return s;
+}
+
+// ---------- 배경 제거
+let bImg = null, bData = null, bScale = 1, bRect = null, bBackImg = null;
+$('bBack').onchange = () => $('bBackImgL').style.display = $('bBack').value === 'image' ? '' : 'none';
+$('bBackImg').onchange = async e => { bBackImg = await readFile(e.target.files[0]); };
+$('bFile').onchange = async e => {
+  bData = await readFile(e.target.files[0]); bImg = await loadImg(bData);
+  bScale = fitCanvas($('bCanvas'), bImg);
+  const cv = $('bCanvas'); bRect = [cv.width*.2, cv.height*.2, cv.width*.6, cv.height*.6]; drawB();
+  $('bOut').src = ''; $('bSave').style.display = 'none';
+};
+function drawB() {
+  const cv = $('bCanvas'), g = cv.getContext('2d');
+  g.drawImage(bImg, 0, 0, cv.width, cv.height);
+  if (!bRect) return;
+  const [x, y, w, h] = bRect;
+  g.fillStyle = 'rgba(0,0,0,.45)';
+  g.fillRect(0, 0, cv.width, y); g.fillRect(0, y + h, cv.width, cv.height - y - h); g.fillRect(0, y, x, h); g.fillRect(x + w, y, cv.width - x - w, h);
+  g.strokeStyle = '#2fb6e8'; g.lineWidth = 2; g.strokeRect(x, y, w, h);
+}
+(() => {
+  const cv = $('bCanvas'); let start = null;
+  const pos = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; };
+  cv.onmousedown = e => { if (!bImg) return; start = pos(e); };
+  window.addEventListener('mousemove', e => { if (!start) return; const p = pos(e);
+    bRect = [Math.min(start[0], p[0]), Math.min(start[1], p[1]), Math.abs(p[0] - start[0]), Math.abs(p[1] - start[1])]; drawB(); });
+  window.addEventListener('mouseup', () => start = null);
+})();
+$('bRun').onclick = async () => {
+  if (!bImg || !bRect || bRect[2] < 4) { alert('사진을 고르고 사각형을 그리세요'); return; }
+  $('bRun').disabled = true; $('bMsg').textContent = '배경을 지우는 중... (처음엔 AI 모델을 불러와 조금 걸립니다)';
+  const rect = bRect.map(v => v / bScale);
+  const r = await post('/api/bgremove', {image:bData, rect, backdrop:$('bBack').value, backImage:bBackImg});
+  $('bRun').disabled = false;
+  if (r.error) { $('bMsg').textContent = '실패: ' + r.error; return; }
+  $('bOut').src = r.image; $('bMsg').textContent = '완료';
+  const a = $('bSave'); a.href = r.image; a.download = 'bg_removed.png'; a.style.display = '';
+};
+
+// ---------- 크로마키
+let kImg = null, kData = null, kKey = [0,177,64], kBackImg = null, kTimer = null, kSmall = null;
+const kSw = () => $('kSw').style.background = `rgb(${kKey[2]},${kKey[1]},${kKey[0]})`;
+kSw();
+$('kBack').onchange = () => { $('kBackImgL').style.display = $('kBack').value === 'image' ? '' : 'none'; kPreview(); };
+$('kBackImg').onchange = async e => { kBackImg = await readFile(e.target.files[0]); kPreview(); };
+$('kFile').onchange = async e => {
+  kData = await readFile(e.target.files[0]); kImg = await loadImg(kData);
+  fitCanvas($('kCanvas'), kImg);
+  // 미리보기용 작은 사진
+  const c = document.createElement('canvas'); const s = Math.min(1, 900 / Math.max(kImg.width, kImg.height));
+  c.width = Math.round(kImg.width * s); c.height = Math.round(kImg.height * s); c.getContext('2d').drawImage(kImg, 0, 0, c.width, c.height);
+  kSmall = c.toDataURL('image/png');
+  const r = await post('/api/chroma/key', {image:kSmall}); if (r.key) { kKey = r.key; kSw(); }
+  kPreview();
+};
+$('kCanvas').onclick = e => {
+  const cv = $('kCanvas'), r = cv.getBoundingClientRect();
+  const x = Math.round((e.clientX - r.left) * cv.width / r.width), y = Math.round((e.clientY - r.top) * cv.height / r.height);
+  const d = cv.getContext('2d').getImageData(Math.max(0, x - 2), Math.max(0, y - 2), 5, 5).data;
+  let R = 0, G = 0, B = 0; for (let i = 0; i < d.length; i += 4) { R += d[i]; G += d[i+1]; B += d[i+2]; }
+  const n = d.length / 4; kKey = [Math.round(B/n), Math.round(G/n), Math.round(R/n)]; kSw(); kPreview();
+};
+['kTol','kSoft','kSpill','kChoke'].forEach(id => $(id).oninput = kPreview);
+const kParams = () => ({key:kKey, tol:+$('kTol').value, soft:+$('kSoft').value, spill:$('kSpill').value/100, choke:+$('kChoke').value, backdrop:$('kBack').value, backImage:kBackImg});
+function kPreview() {
+  if (!kSmall) return; clearTimeout(kTimer);
+  kTimer = setTimeout(async () => { const r = await post('/api/chroma', {image:kSmall, ...kParams()}); if (r.image) $('kOut').src = r.image; }, 150);
+}
+$('kSave').onclick = async () => {
+  if (!kData) { alert('사진을 고르세요'); return; }
+  $('kMsg').textContent = '저장 중...';
+  const r = await post('/api/chroma', {image:kData, ...kParams()});
+  if (r.error) { $('kMsg').textContent = '실패: ' + r.error; return; }
+  const a = document.createElement('a'); a.href = r.image; a.download = 'chroma.png'; a.click(); $('kMsg').textContent = '저장했습니다 (다운로드 폴더)';
+};
+
+// ---------- 사람 / 얼굴 인식 (웹캠)
+const COLORS = ['#00d2ff','#ffaa00','#78e65a','#ff5aa0','#b48cff'];
+let live = null;
+function liveTab(mode, p) {
+  $(p+'Start').onclick = async () => { await post('/api/camera/start', {mode, index:+$(p+'Cam').value}); $(p+'Msg').textContent = '카메라 켜는 중... (처음엔 AI 모델을 불러와 조금 걸립니다)'; live = mode; loop(mode, p); };
+  $(p+'Stop').onclick = async () => { live = null; await post('/api/camera/stop', {}); $(p+'Msg').textContent = '중지했습니다'; };
+  $(p+'Reset').onclick = () => post('/api/camera/reset', {});
+}
+liveTab('person', 'p'); liveTab('face', 'f');
+async function loop(mode, p) {
+  if (live !== mode) return;
+  try {
+    const j = await (await fetch('/api/frame')).json();
+    if (j.error) { $(p+'Msg').textContent = j.error; live = null; return; }
+    if (j.jpeg && j.result) await draw(mode, p, j);
+  } catch (e) {}
+  setTimeout(() => loop(mode, p), 60);
+}
+async function draw(mode, p, j) {
+  const img = await loadImg('data:image/jpeg;base64,' + j.jpeg);
+  const cv = $(p+'Canvas'), g = cv.getContext('2d'), res = j.result;
+  const s = Math.min(1, 1100 / img.width, 680 / img.height);
+  cv.width = img.width * s; cv.height = img.height * s; g.drawImage(img, 0, 0, cv.width, cv.height);
+  const k = cv.width / res.w; g.lineWidth = 3; g.font = 'bold 15px "Malgun Gothic", sans-serif';
+  const label = (txt, x, y, col) => { const w = g.measureText(txt).width + 12; g.fillStyle = col; g.globalAlpha = .85; g.fillRect(x, y - 22, w, 22); g.globalAlpha = 1; g.fillStyle = '#fff'; g.fillText(txt, x + 6, y - 6); };
+  const list = mode === 'person' ? res.people : res.faces;
+  for (const it of list) {
+    const col = COLORS[(it.id - 1) % COLORS.length], [x0, y0, x1, y1] = it.rect.map(v => v * k);
+    g.strokeStyle = col; g.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    if (mode === 'person' && it.pts) {
+      for (const [a, b] of res.edges) if (it.ok[a] && it.ok[b]) { g.beginPath(); g.moveTo(it.pts[a][0]*k, it.pts[a][1]*k); g.lineTo(it.pts[b][0]*k, it.pts[b][1]*k); g.stroke(); }
+      g.fillStyle = '#fff'; it.pts.forEach((q, i) => { if (it.ok[i] && (i < 1 || i > 10)) { g.beginPath(); g.arc(q[0]*k, q[1]*k, 3.5, 0, 7); g.fill(); } });
+    }
+    if (mode === 'person') {
+      label(`사람 #${it.id} · ${it.posture}`, x0, y0, col);
+    } else if (mode === 'face') {
+      g.fillStyle = col; it.pts.forEach(q => g.fillRect(q[0]*k - 1, q[1]*k - 1, 2, 2));
+      label(`얼굴 #${it.id}${it.far ? ' · 원거리' : ''}`, x0, y0, col);
+    }
+  }
+  const b = $(p+'Badge'); b.style.display = '';
+  b.innerHTML = `지금 ${res.now}${mode==='person'?'명':'개'}<br>누적 ${res.total}${mode==='person'?'명':'개'}<br><span class="hint">${j.fps} fps</span>`;
+  $(p+'Msg').textContent = j.running ? '인식 중' : '중지됨';
+}
+</script>
+</body>
+</html>
