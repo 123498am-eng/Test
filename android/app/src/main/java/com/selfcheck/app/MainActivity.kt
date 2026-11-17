@@ -111,6 +111,10 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(this, FaceScanActivity::class.java))
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
+        root.addView(button("얼굴 비교 (닮은 정도 % · 같은 사람인지)") {
+            startActivity(Intent(this, FaceCompareActivity::class.java))
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
         root.addView(button("도구 모음 (사진·카메라·보안·센서 70여 가지)") {
             startActivity(Intent(this, ToolsActivity::class.java))
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))

@@ -7,13 +7,19 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import org.opencv.android.OpenCVLoader
 import org.opencv.android.Utils
+import org.opencv.core.Core
+import org.opencv.core.CvType
 import org.opencv.core.Mat
+import org.opencv.core.MatOfDouble
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 import org.opencv.objdetect.FaceDetectorYN
 import org.opencv.objdetect.FaceRecognizerSF
 import java.io.File
 import java.nio.ByteBuffer
+
+/** 사진 속 얼굴 하나 (비교용). box: 원본 좌표, feat: SFace 특징 128개, crop: 정렬한 얼굴 112×112 */
+class FaceHit(val box: android.graphics.RectF, val det: Float, val feat: FloatArray, val crop: Bitmap, val warnings: List<String>)
 
 /** 내 얼굴과 다른 사진 속 얼굴을 휴대폰 안에서만 비교합니다 (YuNet + SFace). */
 class FaceMatcher(ctx: Context, onStatus: (String) -> Unit = {}) {
@@ -97,6 +103,38 @@ class FaceMatcher(ctx: Context, onStatus: (String) -> Unit = {}) {
             out += feat.clone()
         }
         return out
+    }
+
+    /** 사진 속 모든 얼굴 (큰 얼굴부터). 확실한 얼굴이 없으면 기준을 낮춰 한 번 더 찾습니다. */
+    fun faces(bmp: Bitmap): List<FaceHit> {
+        val rgba = Mat(); Utils.bitmapToMat(bmp, rgba)
+        val bgr = Mat(); Imgproc.cvtColor(rgba, bgr, Imgproc.COLOR_RGBA2BGR); rgba.release()
+        det.setInputSize(Size(bgr.cols().toDouble(), bgr.rows().toDouble()))
+        val f = Mat(); det.detect(bgr, f)
+        if (f.rows() == 0) { det.scoreThreshold = 0.6f; det.detect(bgr, f); det.scoreThreshold = 0.8f }
+        val out = ArrayList<FaceHit>()
+        val row = FloatArray(15)
+        for (i in 0 until f.rows()) {
+            f.get(i, 0, row)
+            val aligned = Mat(); rec.alignCrop(bgr, f.row(i), aligned)
+            val feat = Mat(); rec.feature(aligned, feat)
+            val fa = FloatArray(feat.cols() * feat.rows()); feat.convertTo(feat, CvType.CV_32F); feat.get(0, 0, fa)
+            // 상태: 선명도(라플라시안 분산)·밝기·옆얼굴 정도
+            val gray = Mat(); Imgproc.cvtColor(aligned, gray, Imgproc.COLOR_BGR2GRAY)
+            val lap = Mat(); Imgproc.Laplacian(gray, lap, CvType.CV_64F)
+            val mean = MatOfDouble(); val std = MatOfDouble(); Core.meanStdDev(lap, mean, std)
+            val sharp = std.toArray()[0].let { it * it }
+            val bright = Core.mean(gray).`val`[0]
+            val iod = kotlin.math.hypot(row[6] - row[4], row[7] - row[5]).coerceAtLeast(1f)
+            val turn = kotlin.math.abs(row[8] - (row[4] + row[6]) / 2) / iod
+            val rgbaC = Mat(); Imgproc.cvtColor(aligned, rgbaC, Imgproc.COLOR_BGR2RGBA)
+            val crop = Bitmap.createBitmap(rgbaC.cols(), rgbaC.rows(), Bitmap.Config.ARGB_8888); Utils.matToBitmap(rgbaC, crop)
+            out += FaceHit(android.graphics.RectF(row[0], row[1], row[0] + row[2], row[1] + row[3]), row[14], fa, crop,
+                FaceSimilarity.quality(row[2], row[14], sharp, bright, turn))
+            listOf(aligned, feat, gray, lap, rgbaC).forEach { it.release() }
+        }
+        f.release(); bgr.release()
+        return out.sortedByDescending { it.box.width() * it.box.height() }
     }
 
     /** 사진 속 얼굴 중 내 얼굴과 가장 비슷한 점수. 얼굴이 없으면 null. */
