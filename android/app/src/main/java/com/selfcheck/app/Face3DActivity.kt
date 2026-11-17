@@ -117,6 +117,15 @@ class Face3DActivity : ComponentActivity() {
         }
         bar.btn("OBJ 저장") { exportObj() }
         root.addView(bar)
+        val bar2 = bar()
+        val lights = listOf("정면" to floatArrayOf(0.35f, 0.45f, 1f), "비스듬히" to floatArrayOf(0.75f, 0.55f, 0.6f), "왼쪽" to floatArrayOf(-1.1f, 0.2f, 0.45f),
+            "오른쪽" to floatArrayOf(1.1f, 0.2f, 0.45f), "위" to floatArrayOf(0f, 1.2f, 0.4f), "아래" to floatArrayOf(0f, -1.1f, 0.45f), "역광" to floatArrayOf(0.2f, 0.4f, -1f))
+        var li = if (detail) 1 else 0
+        bar2.btn("조명: ${lights[li].first}") { b -> li = (li + 1) % lights.size; b.text = "조명: ${lights[li].first}"; renderer?.light = lights[li].second; glView?.requestRender() }
+        bar2.btn("화면 저장") { captureScreen() }
+        bar2.btn("STL 저장") { mesh?.let { ObjExport.saveStl(this, it) } ?: Toast.makeText(this, "모델이 아직 없습니다", Toast.LENGTH_SHORT).show() }
+        bar2.btn("PLY 저장") { mesh?.let { ObjExport.savePly(this, it) } ?: Toast.makeText(this, "모델이 아직 없습니다", Toast.LENGTH_SHORT).show() }
+        root.addView(bar2)
         setContentView(root)
 
         if (live) {
@@ -152,7 +161,9 @@ class Face3DActivity : ComponentActivity() {
     private fun buildMesh(file: File): MeshData? {
         val bmp = if (detail) runCatching { FaceMatcher.decodeFile(file, 4096) }.getOrElse { FaceMatcher.decodeFile(file, 2048) }
             else FaceMatcher.decodeFile(file, 2048)
-        val res = FaceMesh.analyze(this, bmp) ?: return null
+        runOnUiThread { status.text = "얼굴 점 정밀 측정 중 (6번 측정해 중앙값)..." }
+        val res = FaceMesh.analyzeTTA(this, bmp) { i -> runOnUiThread { status.text = "얼굴 점 정밀 측정 중 ${i + 1}/6" } } ?: return null
+        runOnUiThread { status.text = "3D 모델 만드는 중..." }
         val w = bmp.width.toFloat(); val h = bmp.height.toFloat()
         var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
         for (i in 0 until res.points.size / 3) {
@@ -174,7 +185,9 @@ class Face3DActivity : ComponentActivity() {
         val mesh = MeshData.build(Subdivision.get(this, if (detail) 3 else 2), res.points, w, h, used, tex)
         if (detail) {
             runOnUiThread { status.text = "주름 맵 만드는 중..." }
-            mesh.detail = DetailMap.make(tex)
+            // 텍스처에서 눈꼬리 사이 거리 (주름 찾기 굵기 기준)
+            val iodPx = kotlin.math.hypot((res.points[263 * 3] - res.points[33 * 3]) * w, (res.points[263 * 3 + 1] - res.points[33 * 3 + 1]) * h)
+            mesh.detail = DetailMap.make(tex, this, iodPx * texSize / used.width())
             mesh.tangents // 미리 계산
         }
         bmp.recycle()
@@ -236,23 +249,74 @@ class Face3DActivity : ComponentActivity() {
     override fun onPause() { super.onPause(); glView?.onPause() }
     override fun onResume() { super.onResume(); glView?.onResume() }
 
+    private fun captureScreen() {
+        val r = renderer ?: return
+        r.capture = { bmp ->
+            thread {
+                val msg = runCatching { MediaSave.savePng(this, bmp, "face_3d_${System.currentTimeMillis()}.png") + " 에 저장했습니다" }.getOrElse { "저장 실패: ${it.message}" }
+                runOnUiThread { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() }
+            }
+        }
+        glView?.requestRender()
+    }
+
     private fun exportObj() {
         val m = mesh ?: run { Toast.makeText(this, "모델이 아직 없습니다", Toast.LENGTH_SHORT).show(); return }
         ObjExport.save(this, m)
     }
 }
 
-/** face.obj + face.mtl + face.jpg 를 zip 하나로 묶어 다운로드 폴더에 저장합니다. */
+/** face.obj + face.mtl + face.jpg 를 zip 하나로 묶어 다운로드 폴더에 저장합니다. STL(3D 프린터용)·PLY(색 포함)도 저장합니다. */
 object ObjExport {
-    fun save(act: android.app.Activity, m: MeshData) {
+    fun save(act: android.app.Activity, m: MeshData) =
+        saveFile(act, "face_3d_${System.currentTimeMillis()}.zip", "application/zip") { os -> ZipOutputStream(os).use { m.writeZip(it) } }
+
+    /** 바이너리 STL: 3D 프린터 프로그램에서 열 수 있습니다 (크기는 프로그램에서 맞추세요) */
+    fun saveStl(act: android.app.Activity, m: MeshData) = saveFile(act, "face_3d_${System.currentTimeMillis()}.stl", "model/stl") { os ->
+        val n = m.tris.size / 3
+        val bb = java.nio.ByteBuffer.allocate(84 + n * 50).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        val head = "SelfCheck face mesh".toByteArray(); bb.put(head); bb.position(80); bb.putInt(n)
+        val sc = 100f // 단위: 대략 mm 로 보이게 키움
+        for (t in 0 until n) {
+            val a = m.tris[t * 3]; val b = m.tris[t * 3 + 1]; val c = m.tris[t * 3 + 2]
+            fun p(i: Int, k: Int) = m.pos[i * 3 + k]
+            val ux = p(b, 0) - p(a, 0); val uy = p(b, 1) - p(a, 1); val uz = p(b, 2) - p(a, 2)
+            val vx = p(c, 0) - p(a, 0); val vy = p(c, 1) - p(a, 1); val vz = p(c, 2) - p(a, 2)
+            var nx = uy * vz - uz * vy; var ny = uz * vx - ux * vz; var nz = ux * vy - uy * vx
+            val l = kotlin.math.sqrt(nx * nx + ny * ny + nz * nz).coerceAtLeast(1e-12f); nx /= l; ny /= l; nz /= l
+            bb.putFloat(nx); bb.putFloat(ny); bb.putFloat(nz)
+            for (i in intArrayOf(a, b, c)) { bb.putFloat(p(i, 0) * sc); bb.putFloat(p(i, 1) * sc); bb.putFloat(p(i, 2) * sc) }
+            bb.putShort(0)
+        }
+        os.write(bb.array())
+    }
+
+    /** PLY: 점마다 사진 색을 담은 3D 파일 (MeshLab·Blender 등) */
+    fun savePly(act: android.app.Activity, m: MeshData) = saveFile(act, "face_3d_${System.currentTimeMillis()}.ply", "application/octet-stream") { os ->
+        val tex = m.texture
+        val px = tex?.let { IntArray(it.width * it.height).also { a -> it.getPixels(a, 0, it.width, 0, 0, it.width, it.height) } }
+        val sb = StringBuilder("ply\nformat ascii 1.0\ncomment SelfCheck face mesh\nelement vertex ${m.count}\nproperty float x\nproperty float y\nproperty float z\n" +
+            "property float nx\nproperty float ny\nproperty float nz\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nelement face ${m.tris.size / 3}\nproperty list uchar int vertex_indices\nend_header\n")
+        for (i in 0 until m.count) {
+            var col = Color.LTGRAY
+            if (tex != null && px != null) {
+                val x = (m.uv[i * 2] * (tex.width - 1)).toInt().coerceIn(0, tex.width - 1); val y = (m.uv[i * 2 + 1] * (tex.height - 1)).toInt().coerceIn(0, tex.height - 1)
+                col = px[y * tex.width + x]
+            }
+            sb.append(String.format(java.util.Locale.US, "%.5f %.5f %.5f %.4f %.4f %.4f %d %d %d\n", m.pos[i * 3], m.pos[i * 3 + 1], m.pos[i * 3 + 2],
+                m.normal[i * 3], m.normal[i * 3 + 1], m.normal[i * 3 + 2], Color.red(col), Color.green(col), Color.blue(col)))
+        }
+        for (t in m.tris.indices step 3) sb.append("3 ${m.tris[t]} ${m.tris[t + 1]} ${m.tris[t + 2]}\n")
+        os.write(sb.toString().toByteArray())
+    }
+
+    fun saveFile(act: android.app.Activity, name: String, mime: String, write: (OutputStream) -> Unit) {
         thread {
-            val name = "face_3d_${System.currentTimeMillis()}.zip"
             val msg = runCatching {
-                val write: (OutputStream) -> Unit = { os -> ZipOutputStream(os).use { m.writeZip(it) } }
                 if (Build.VERSION.SDK_INT >= 29) {
                     val cv = ContentValues().apply {
                         put(MediaStore.Downloads.DISPLAY_NAME, name)
-                        put(MediaStore.Downloads.MIME_TYPE, "application/zip")
+                        put(MediaStore.Downloads.MIME_TYPE, mime)
                         put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/SelfCheck")
                     }
                     val uri = act.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv)!!
@@ -279,6 +343,9 @@ class PhotoRenderer(private val m: MeshData) : GLSurfaceView.Renderer {
     @Volatile var panY = 0f
     @Volatile var light = floatArrayOf(0.35f, 0.45f, 1f)
     @Volatile var detailStrength = 0.6f
+    /** 다음 그림을 비트맵으로 받아 보는 콜백 (GL 스레드에서 불림) */
+    @Volatile var capture: ((Bitmap) -> Unit)? = null
+    private var vw = 1; private var vh = 1
     private var lastTime = 0L
     private val gl = MeshGL()
     private val proj = FloatArray(16); private val view = FloatArray(16)
@@ -295,6 +362,7 @@ class PhotoRenderer(private val m: MeshData) : GLSurfaceView.Renderer {
 
     override fun onSurfaceChanged(g: GL10?, w: Int, h: Int) {
         GLES20.glViewport(0, 0, w, h)
+        vw = w; vh = h
         Matrix.perspectiveM(proj, 0, 35f, w.toFloat() / h.coerceAtLeast(1), 0.02f, 50f)
     }
 
@@ -312,5 +380,13 @@ class PhotoRenderer(private val m: MeshData) : GLSurfaceView.Renderer {
         Matrix.multiplyMM(tmp, 0, view, 0, model, 0)
         Matrix.multiplyMM(mvp, 0, proj, 0, tmp, 0)
         gl.drawMesh(mvp, model, mode)
+        capture?.let { cb ->
+            capture = null
+            val buf = java.nio.ByteBuffer.allocateDirect(vw * vh * 4).order(java.nio.ByteOrder.nativeOrder())
+            GLES20.glReadPixels(0, 0, vw, vh, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf)
+            val raw = Bitmap.createBitmap(vw, vh, Bitmap.Config.ARGB_8888); buf.rewind(); raw.copyPixelsFromBuffer(buf)
+            val flip = android.graphics.Matrix().apply { postScale(1f, -1f) }
+            cb(Bitmap.createBitmap(raw, 0, 0, vw, vh, flip, false)); raw.recycle()
+        }
     }
 }

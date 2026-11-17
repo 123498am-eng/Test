@@ -506,7 +506,11 @@ class MeshGL {
  * 어두운 선(주름)은 홈, 밝은 부분은 솟은 곳으로 표현됩니다.
  */
 object DetailMap {
-    fun make(tex: Bitmap): Bitmap {
+    /**
+     * ctx 와 u(텍스처에서 눈꼬리 사이 거리, 픽셀)를 주면 주름 강조판을 만듭니다:
+     * 피부 분석과 같은 방법으로 찾은 주름(어두운 가는 선)을 홈으로 더 파고, 머리카락·눈썹 등 피부가 아닌 곳의 결은 줄입니다.
+     */
+    fun make(tex: Bitmap, ctx: android.content.Context? = null, u: Float = 0f): Bitmap {
         check(org.opencv.android.OpenCVLoader.initLocal()) { "OpenCV를 불러오지 못했습니다" }
         val cv = org.opencv.core.CvType.CV_32F
         val rgba = org.opencv.core.Mat(); org.opencv.android.Utils.bitmapToMat(tex, rgba)
@@ -520,6 +524,7 @@ object DetailMap {
         val mean = org.opencv.core.MatOfDouble(); val std = org.opencv.core.MatOfDouble()
         org.opencv.core.Core.meanStdDev(h, mean, std)
         org.opencv.core.Core.multiply(h, org.opencv.core.Scalar(1.0 / (3.0 * maxOf(std.toArray()[0], 1e-6))), h)
+        if (ctx != null && u > 20f) runCatching { emphasize(ctx, tex, gray, h, u) }
         val gx = org.opencv.core.Mat(); val gy = org.opencv.core.Mat()
         org.opencv.imgproc.Imgproc.Sobel(h, gx, cv, 1, 0, 3)
         org.opencv.imgproc.Imgproc.Sobel(h, gy, cv, 0, 1, 3)
@@ -537,5 +542,30 @@ object DetailMap {
         org.opencv.android.Utils.matToBitmap(out, bmp)
         listOf(rgba, gray, g, low, hp, h, gx, gy, r8, g8, b8, a8, out).forEach { it.release() }
         return bmp
+    }
+
+    private fun emphasize(ctx: android.content.Context, tex: Bitmap, gray: org.opencv.core.Mat, h: org.opencv.core.Mat, u: Float) {
+        val w = h.cols(); val hh = h.rows(); val n = w * hh
+        // 주름 찾기는 눈꼬리 거리 450px 정도에서 (텍스처가 크면 줄여서 계산 후 다시 키움)
+        val s = if (u > 450f) 450.0 / u else 1.0
+        val L = org.opencv.core.Mat(); gray.convertTo(L, org.opencv.core.CvType.CV_32F, 100.0 / 255.0)
+        if (s < 1.0) org.opencv.imgproc.Imgproc.resize(L, L, org.opencv.core.Size(w * s, hh * s), 0.0, 0.0, org.opencv.imgproc.Imgproc.INTER_AREA)
+        val v = SkinCore.ridge(L, (u * s).toFloat(), doubleArrayOf(0.0025, 0.004, 0.007, 0.011), 0.7, 0.5)
+        var vm = SkinCore.fmat(v, L.cols(), L.rows())
+        if (s < 1.0) { val t = org.opencv.core.Mat(); org.opencv.imgproc.Imgproc.resize(vm, t, org.opencv.core.Size(w.toDouble(), hh.toDouble())); vm.release(); vm = t }
+        val vv = SkinCore.floats(vm); vm.release(); L.release()
+        // 피부 확률 (부드럽게)
+        val prob = Segment.one(ctx, tex, 3)
+        val pv = if (prob != null) {
+            org.opencv.imgproc.Imgproc.GaussianBlur(prob, prob, org.opencv.core.Size(0.0, 0.0), u * 0.02)
+            SkinCore.floats(prob).also { prob.release() }
+        } else null
+        val hv = SkinCore.floats(h)
+        for (i in 0 until n) {
+            val sk = pv?.get(i)?.coerceIn(0f, 1f) ?: 1f
+            val groove = (vv[i] / 2f).coerceIn(0f, 2f) * sk
+            hv[i] = (hv[i] - 0.45f * groove) * (0.35f + 0.65f * sk)
+        }
+        h.put(0, 0, hv)
     }
 }

@@ -374,6 +374,35 @@ object MediaSave {
         return f.absolutePath
     }
 
+    /** JPEG 로 저장 (촬영 정보·위치 없음) */
+    fun saveJpeg(ctx: Context, bmp: Bitmap, name: String, quality: Int): String {
+        if (Build.VERSION.SDK_INT >= 29) {
+            val cv = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/SelfCheck")
+            }
+            val uri = ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv)!!
+            ctx.contentResolver.openOutputStream(uri)!!.use { bmp.compress(Bitmap.CompressFormat.JPEG, quality, it) }
+            return "사진/SelfCheck/$name"
+        }
+        val f = File(ctx.getExternalFilesDir(Environment.DIRECTORY_PICTURES), name)
+        f.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, quality, it) }
+        return f.absolutePath
+    }
+
+    /** 다른 앱으로 보내기 (앱 안 임시 파일 → 공유 창) */
+    fun share(act: android.app.Activity, bmp: Bitmap, text: String? = null) {
+        val dir = File(act.cacheDir, "share").apply { mkdirs() }
+        val f = File(dir, "share_${System.currentTimeMillis()}.png")
+        f.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val uri = androidx.core.content.FileProvider.getUriForFile(act, "${act.packageName}.files", f)
+        val i = android.content.Intent(android.content.Intent.ACTION_SEND).setType("image/png")
+            .putExtra(android.content.Intent.EXTRA_STREAM, uri).addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (text != null) i.putExtra(android.content.Intent.EXTRA_TEXT, text)
+        act.startActivity(android.content.Intent.createChooser(i, "보내기"))
+    }
+
     /** 새 동영상 파일을 만들고 (재생용 Uri, 쓰기용 파일, 완료 처리)를 돌려줍니다. */
     class VideoOut(val uri: Uri, val pfd: ParcelFileDescriptor, val label: String, private val onDone: () -> Unit) {
         fun done() { runCatching { pfd.close() }; onDone() }

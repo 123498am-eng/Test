@@ -50,6 +50,13 @@ class PhotoActivity : ComponentActivity() {
         root.addView(image, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
 
         root.addView(Button(this).apply {
+            text = "정밀 얼굴 스캔 (주름·피부·비율·대칭)"
+            setOnClickListener {
+                startActivity(Intent(this@PhotoActivity, FaceScanActivity::class.java).putExtra("path", file.absolutePath))
+            }
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
+
+        root.addView(Button(this).apply {
             text = "3D 자세히 보기 (주름·피부 결)"
             setOnClickListener {
                 startActivity(Intent(this@PhotoActivity, Face3DActivity::class.java).putExtra("path", file.absolutePath).putExtra("detail", true))
@@ -85,7 +92,7 @@ class PhotoActivity : ComponentActivity() {
             return
         }
         runOnUiThread { image.setImageBitmap(bmp) }
-        val r = runCatching { FaceMesh.analyze(this, bmp) }
+        val r = runCatching { FaceMesh.analyzeTTA(this, bmp) }
         runOnUiThread {
             faceBox.removeAllViews()
             val res = r.getOrNull()
@@ -101,7 +108,7 @@ class PhotoActivity : ComponentActivity() {
                         return if (vals.isEmpty()) "-" else "${(vals.average() * 100).roundToInt()}%"
                     }
                     faceBox.addView(rowView("찾은 얼굴 수", "${res.faceCount}명 (가장 큰 얼굴 기준)"))
-                    faceBox.addView(rowView("얼굴 점", "${res.points.size / 3}개 (3D 좌표)"))
+                    faceBox.addView(rowView("얼굴 점", "${res.points.size / 3}개 (3D 좌표, ${res.passes}번 측정 중앙값)"))
                     faceBox.addView(rowView("좌우 방향", side(res.yaw, "화면 오른쪽", "화면 왼쪽")))
                     faceBox.addView(rowView("위아래 방향", side(res.pitch, "위", "아래")))
                     faceBox.addView(rowView("기울기", side(res.roll, "시계 방향", "반시계 방향")))

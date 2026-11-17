@@ -107,6 +107,14 @@ class MainActivity : ComponentActivity() {
         }
         root.addView(startBtn, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
 
+        root.addView(button("정밀 얼굴 스캔 (주름·피부·비율·대칭)") {
+            startActivity(Intent(this, FaceScanActivity::class.java))
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        root.addView(button("도구 모음 (사진·카메라·보안·센서 70여 가지)") {
+            startActivity(Intent(this, ToolsActivity::class.java))
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
         root.addView(button("사람 인식") {
             startActivity(Intent(this, PersonActivity::class.java))
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))

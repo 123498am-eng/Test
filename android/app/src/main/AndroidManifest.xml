@@ -8,6 +8,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 소음 측정·동영상 녹화 소리 (사용할 때만 묻습니다) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 앱 권한 점검: 설치된 앱 목록 보기 (휴대폰 안에서만 확인, 밖으로 보내지 않음) -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
 
     <application
         android:name=".SelfCheckApp"
@@ -32,6 +36,20 @@
         <activity android:name=".PersonActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".PlateActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".LiveActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".FaceScanActivity" android:exported="false" />
+        <activity android:name=".ToolsActivity" android:exported="false" />
+        <activity android:name=".PhotoToolActivity" android:exported="false" />
+        <activity android:name=".LiveToolActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".UtilityActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".SensorActivity" android:exported="false" android:screenOrientation="portrait" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
 
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
