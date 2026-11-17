@@ -38,6 +38,7 @@
         <activity android:name=".LiveActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".FaceScanActivity" android:exported="false" />
         <activity android:name=".FaceCompareActivity" android:exported="false" />
+        <activity android:name=".VoiceChangerActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".PlateLookupActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".ToolsActivity" android:exported="false" />
         <activity android:name=".PhotoToolActivity" android:exported="false" />
