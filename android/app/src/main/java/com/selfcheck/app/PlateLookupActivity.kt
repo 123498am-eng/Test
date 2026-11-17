@@ -62,7 +62,6 @@ class PlateLookupActivity : ColumnActivity() {
         for ((k, v) in listOf("차량 종류" to info.kind, "용도" to info.usage, "형식" to info.format)) c.addView(rowView(k, v))
         if (!info.valid) c.addView(warn("⚠ 형식이 이상합니다"))
         info.notes.forEach { c.addView(hint("• $it")) }
-        full(c, 10)
         out.addView(c, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
         out.addView(section("공식 조회 서비스 (본인 차량·정당한 용도)"))
         for (l in PlateLinks.ALL) {
