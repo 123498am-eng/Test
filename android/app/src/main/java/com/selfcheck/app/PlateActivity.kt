@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.AlertDialog
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -113,6 +114,13 @@ class PlateActivity : ComponentActivity() {
         btn("목록 저장") { saveList(false) }
         btn("목록 비우기") {
             synchronized(found) { found.clear() }; overlay.list = emptyList()
+        }
+        btn("조회") {
+            val list = synchronized(found) { found.values.sortedByDescending { it.first }.map { it.plate } }
+            if (list.isEmpty()) startActivity(Intent(this, PlateLookupActivity::class.java))
+            else AlertDialog.Builder(this).setTitle("조회할 번호판")
+                .setItems(list.map { PlateParser.pretty(it) }.toTypedArray()) { _, i -> startActivity(Intent(this, PlateLookupActivity::class.java).putExtra("plate", list[i])) }
+                .setNeutralButton("직접 입력") { _, _ -> startActivity(Intent(this, PlateLookupActivity::class.java)) }.show()
         }
         btn("플래시") { b -> torch = !torch; camera?.cameraControl?.enableTorch(torch); b.text = if (torch) "플래시 끔" else "플래시" }
         bottom.addView(bar)

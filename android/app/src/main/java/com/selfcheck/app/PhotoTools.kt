@@ -395,7 +395,7 @@ object PhotoTools {
         return ToolOut(Cv.bmp(img), "얼굴 ${faces.size}개를 가렸습니다. 놓친 얼굴이 없는지 확인하세요.").also { img.release() }
     }
 
-    private fun textBlocks(ctx: Context, b: Bitmap): List<Pair<String, android.graphics.Rect>> {
+    internal fun textBlocks(ctx: Context, b: Bitmap): List<Pair<String, android.graphics.Rect>> {
         val rec = TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
         try {
             val out = ArrayList<Pair<String, android.graphics.Rect>>()

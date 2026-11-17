@@ -127,6 +127,10 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(this, PlateActivity::class.java))
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
+        root.addView(button("번호판 조회 (종류·용도 해석 · 공식 서비스)") {
+            startActivity(Intent(this, PlateLookupActivity::class.java))
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
         root.addView(button("편집 (표정 따라하기 · 배경 제거)") {
             startActivity(Intent(this, EditActivity::class.java))
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))

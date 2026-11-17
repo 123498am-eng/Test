@@ -34,6 +34,7 @@ class ToolsActivity : ColumnActivity() {
         photo("사진 편집", "resize", "rotate", "contrast", "denoise", "sharpen", "hdr")
         photo("필터·효과", "bw", "sepia", "vintage", "color", "vignette", "sketch", "cartoon", "watercolor", "pixel", "watermark")
         photo("문서·글자·색", "doc_scan", "ocr", "palette")
+        entries += Entry("문서·글자·색", "번호판 조회", "번호판 글자로 차량 종류·용도 풀이 + 공식 조회 서비스 연결 (소유자 조회 없음)") { Intent(this, PlateLookupActivity::class.java) }
         for (t in LiveTools.ALL) entries += Entry("실시간 카메라", t.title, t.desc) { Intent(this, LiveToolActivity::class.java).putExtra("tool", t.id) }
         for ((id, title, desc) in UtilityActivity.TOOLS) if (id != "privacy") entries += Entry("보안·생활", title, desc) { Intent(this, UtilityActivity::class.java).putExtra("tool", id) }
         for ((id, title, desc) in SensorActivity.TOOLS) entries += Entry("센서", title, desc) { Intent(this, SensorActivity::class.java).putExtra("tool", id) }
