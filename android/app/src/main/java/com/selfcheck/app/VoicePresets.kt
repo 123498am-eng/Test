@@ -4,7 +4,7 @@ import kotlin.math.roundToInt
 
 class VoicePreset(val id: String, val name: String, val group: String, val desc: String, val chain: VoiceChain)
 
-/** 실시간 음성 변조 프리셋 48가지 */
+/** 실시간 음성 변조 프리셋 */
 object VoicePresets {
     private fun hp(fs: Int, f: Double) = Biquad.highpass(fs, f)
     private fun lp(fs: Int, f: Double) = Biquad.lowpass(fs, f)
@@ -23,15 +23,45 @@ object VoicePresets {
         VoicePreset("fem_breathy", "여성 (숨소리 섞인 부드러운)", "여성", "숨소리를 살짝 섞은 부드러운 여성 목소리",
             VoiceChain(listOf(VoiceCfg(targetHz = 210f, intonation = 1.05f, formantLink = 0.30f)), whisper = 0.16f,
                 fx = { fs -> listOf(hp(fs, 90.0), Biquad.highShelf(fs, 5000.0, 2.0)) })),
-        VoicePreset("girl", "소녀", "여성", "밝고 어린 여성 목소리 (약 265Hz)",
+        VoicePreset("girl", "소녀 (밝고 어린)", "소녀", "밝고 어린 목소리 (약 265Hz)",
             VoiceChain(listOf(VoiceCfg(targetHz = 265f, intonation = 1.1f, formant = 1.04f, formantLink = 0.4f)),
                 fx = { fs -> listOf(hp(fs, 120.0), Biquad.highShelf(fs, 4000.0, 2.0)) })),
         VoicePreset("grandma", "할머니", "여성", "약간 떨리는 나이 든 여성 목소리",
-            VoiceChain(listOf(VoiceCfg(targetHz = 190f, intonation = 0.95f, formantLink = 0.28f, vibratoHz = 5.5f, vibratoCents = 18f)),
+            VoiceChain(listOf(VoiceCfg(targetHz = 190f, intonation = 0.95f, formantLink = 0.28f, vibratoHz = 5.5f, vibratoCents = 18f, vibratoOnsetMs = 220f)),
                 fx = { fs -> listOf(hp(fs, 100.0), lp(fs, 4800.0), lp(fs, 4800.0)) })),
-        VoicePreset("announcer_f", "방송 아나운서 (여성)", "여성", "또렷하고 안정된 방송 톤 (음량을 고르게)",
-            VoiceChain(listOf(VoiceCfg(targetHz = 215f, intonation = 0.9f, formantLink = 0.30f)),
-                fx = { fs -> listOf(hp(fs, 90.0), Biquad.peak(fs, 3000.0, 1.0, 2.5), Compressor(fs, -26f, 3f, 5f)) })),
+        // ---------------- 소녀 (가늘고 여리고 귀여운)
+        VoicePreset("girl_thin", "가늘고 여린 소녀", "소녀", "높고 가는 목소리에 숨소리와 아주 작은 떨림을 섞은 여린 느낌 (약 300Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 300f, intonation = 1.12f, formant = 1.08f, formantLink = 0.34f, vibratoHz = 6.2f, vibratoCents = 9f, vibratoOnsetMs = 220f)),
+                whisper = 0.20f, breathTilt = 0.70,
+                fx = { fs -> listOf(hp(fs, 230.0), Biquad.lowShelf(fs, 300.0, -3.0), Biquad.peak(fs, 3500.0, 1.0, 2.5), Biquad.highShelf(fs, 6000.0, 2.5), Tremolo(fs, 5.5f, 0.07f), Compressor(fs, -30f, 2.5f, 3f)) })),
+        VoicePreset("girl_cute", "귀여운 소녀", "소녀", "높고 통통 튀는 억양, 밝고 또렷한 귀여운 목소리 (약 318Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 318f, intonation = 1.28f, formant = 1.10f, formantLink = 0.34f)),
+                whisper = 0.06f, breathTilt = 0.80,
+                fx = { fs -> listOf(hp(fs, 200.0), Biquad.peak(fs, 3200.0, 1.0, 3.0), Biquad.highShelf(fs, 5500.0, 3.0)) })),
+        VoicePreset("girl_shy", "수줍은 소녀", "소녀", "숨소리가 많고 조용하게 속삭이듯 말하는 부끄러운 목소리 (약 268Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 268f, intonation = 0.92f, formant = 1.06f, formantLink = 0.32f, vibratoHz = 5.5f, vibratoCents = 7f, vibratoOnsetMs = 260f)),
+                whisper = 0.32f, breathTilt = 0.65,
+                fx = { fs -> listOf(hp(fs, 180.0), lp(fs, 7500.0), Biquad.highShelf(fs, 4500.0, 1.5), Tremolo(fs, 4.8f, 0.06f), Compressor(fs, -30f, 2.5f, 3f)) })),
+        VoicePreset("girl_pure", "맑고 청아한 소녀", "소녀", "투명하고 맑게 울리는 높은 목소리, 아주 작은 공기감 (약 292Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 292f, intonation = 1.15f, formant = 1.12f, formantLink = 0.36f)),
+                whisper = 0.10f, breathTilt = 0.80,
+                fx = { fs -> listOf(hp(fs, 190.0), Biquad.peak(fs, 4000.0, 1.2, 2.0), Biquad.highShelf(fs, 6500.0, 3.5), Reverb(fs, 0.45f, 0.6f, 0.07f, 10f)) })),
+        // ---------------- 뉴스 아나운서 (여성)
+        VoicePreset("news_f_anchor", "메인 뉴스 앵커 (여)", "뉴스 여성", "차분하고 신뢰감 있는 저녁 메인 뉴스 톤 (억양을 안정되게, 약 196Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 196f, intonation = 0.82f, formantLink = 0.30f)),
+                fx = { fs -> listOf(hp(fs, 90.0), Biquad.lowShelf(fs, 220.0, 1.0), Biquad.peak(fs, 3000.0, 1.0, 2.5), Compressor(fs, -26f, 3f, 4f)) })),
+        VoicePreset("news_f_morning", "아침 뉴스 · 밝고 경쾌 (여)", "뉴스 여성", "밝고 가볍게 전하는 아침 뉴스 톤 (약 226Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 226f, intonation = 0.95f, formant = 1.03f, formantLink = 0.32f)),
+                fx = { fs -> listOf(hp(fs, 100.0), Biquad.peak(fs, 3500.0, 1.0, 3.0), Biquad.highShelf(fs, 5000.0, 2.5), Compressor(fs, -26f, 2.5f, 3f)) })),
+        VoicePreset("news_f_flash", "속보 · 긴박하고 단호하게 (여)", "뉴스 여성", "높낮이를 거의 두지 않고 또박또박 힘 있게 (약 208Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 208f, intonation = 0.62f, formantLink = 0.30f)),
+                fx = { fs -> listOf(hp(fs, 110.0), Biquad.peak(fs, 2500.0, 0.9, 4.0), Compressor(fs, -30f, 4f, 6f)) })),
+        VoicePreset("news_f_radio", "라디오 뉴스 · 따뜻하고 부드럽게 (여)", "뉴스 여성", "낮은 소리를 두툼하게, 고음은 부드럽게 (약 186Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 186f, intonation = 0.90f, formantLink = 0.28f)), whisper = 0.05f, breathTilt = 0.80,
+                fx = { fs -> listOf(hp(fs, 80.0), Biquad.lowShelf(fs, 250.0, 3.0), Biquad.highShelf(fs, 7000.0, -1.5), Compressor(fs, -24f, 2.5f, 3f)) })),
+        VoicePreset("news_f_biz", "경제·시사 · 낮고 단단하게 (여)", "뉴스 여성", "낮고 단단한 해설 톤 (약 176Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 176f, intonation = 0.74f, formant = 0.98f, formantLink = 0.28f)),
+                fx = { fs -> listOf(hp(fs, 80.0), Biquad.lowShelf(fs, 200.0, 2.0), Biquad.peak(fs, 2000.0, 1.0, 2.0), Compressor(fs, -28f, 3.5f, 4f)) })),
         // ---------------- 남성
         VoicePreset("male_natural", "남성 (자연스럽게)", "남성", "내 목소리 높이를 재서 남성 평균(약 112Hz)으로 옮김",
             VoiceChain(listOf(VoiceCfg(targetHz = 112f, intonation = 1.0f, formantLink = 0.30f)),
@@ -42,14 +72,27 @@ object VoicePresets {
         VoicePreset("male_young", "젊은 남성", "남성", "가볍고 맑은 남성 목소리 (약 130Hz)",
             VoiceChain(listOf(VoiceCfg(targetHz = 130f, formantLink = 0.25f)))),
         VoicePreset("grandpa", "할아버지", "남성", "낮고 떨리는 나이 든 남성 목소리",
-            VoiceChain(listOf(VoiceCfg(targetHz = 100f, intonation = 0.9f, formantLink = 0.28f, vibratoHz = 5f, vibratoCents = 20f)),
+            VoiceChain(listOf(VoiceCfg(targetHz = 100f, intonation = 0.9f, formantLink = 0.28f, vibratoHz = 5f, vibratoCents = 20f, vibratoOnsetMs = 220f)),
                 fx = { fs -> listOf(lp(fs, 4200.0), lp(fs, 4200.0)) })),
-        VoicePreset("announcer_m", "중후한 아나운서", "남성", "낮고 안정된 방송 톤",
-            VoiceChain(listOf(VoiceCfg(targetHz = 100f, intonation = 0.9f, formantLink = 0.30f)),
-                fx = { fs -> listOf(Biquad.lowShelf(fs, 180.0, 3.0), Compressor(fs, -26f, 3f, 5f)) })),
         VoicePreset("giant", "거인", "남성", "아주 크고 느린 느낌의 낮은 목소리",
             VoiceChain(listOf(VoiceCfg(semitones = -8f, formantLink = 0.6f)),
                 fx = { fs -> listOf(Reverb(fs, 0.55f, 0.5f, 0.12f)) })),
+        // ---------------- 뉴스 아나운서 (남성)
+        VoicePreset("news_m_anchor", "메인 뉴스 앵커 (남)", "뉴스 남성", "묵직하고 신뢰감 있는 저녁 메인 뉴스 톤 (억양을 안정되게, 약 108Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 108f, intonation = 0.78f, formantLink = 0.30f)),
+                fx = { fs -> listOf(Biquad.lowShelf(fs, 150.0, 3.0), Biquad.peak(fs, 2800.0, 1.0, 2.5), Compressor(fs, -26f, 3f, 4f)) })),
+        VoicePreset("news_m_morning", "아침 뉴스 · 또렷하고 경쾌 (남)", "뉴스 남성", "또렷하고 가볍게 전하는 아침 뉴스 톤 (약 124Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 124f, intonation = 0.95f, formantLink = 0.28f)),
+                fx = { fs -> listOf(hp(fs, 70.0), Biquad.peak(fs, 3000.0, 1.0, 3.0), Biquad.highShelf(fs, 5000.0, 1.5), Compressor(fs, -26f, 2.5f, 3f)) })),
+        VoicePreset("news_m_flash", "속보 · 긴박하고 단호하게 (남)", "뉴스 남성", "높낮이를 거의 두지 않고 또박또박 힘 있게 (약 114Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 114f, intonation = 0.60f, formantLink = 0.30f)),
+                fx = { fs -> listOf(hp(fs, 80.0), Biquad.peak(fs, 2200.0, 0.9, 4.0), Compressor(fs, -30f, 4f, 6f)) })),
+        VoicePreset("news_m_radio", "라디오 뉴스 · 따뜻한 중저음 (남)", "뉴스 남성", "저음을 두툼하게, 고음은 부드럽게 (약 100Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 100f, intonation = 0.85f, formant = 0.98f, formantLink = 0.30f)),
+                fx = { fs -> listOf(Biquad.lowShelf(fs, 180.0, 4.0), Biquad.highShelf(fs, 7000.0, -1.5), Compressor(fs, -24f, 2.5f, 3f)) })),
+        VoicePreset("news_m_doc", "다큐 내레이션 · 깊고 묵직하게 (남)", "뉴스 남성", "느리고 깊게 울리는 내레이션 톤 (약 92Hz)",
+            VoiceChain(listOf(VoiceCfg(targetHz = 92f, intonation = 0.70f, formant = 0.96f, formantLink = 0.35f)),
+                fx = { fs -> listOf(Biquad.lowShelf(fs, 120.0, 4.0), Biquad.peak(fs, 2500.0, 1.0, 1.5), Reverb(fs, 0.35f, 0.6f, 0.05f, 18f), Compressor(fs, -28f, 3f, 4f)) })),
         // ---------------- 아이·캐릭터
         VoicePreset("child", "아이", "캐릭터", "어린아이 목소리 (약 270Hz)",
             VoiceChain(listOf(VoiceCfg(targetHz = 270f, intonation = 1.1f, formant = 1.05f, formantLink = 0.45f)),
@@ -92,21 +135,21 @@ object VoicePresets {
             VoiceChain(emptyList(), whisper = 1.2f, fx = { fs -> listOf(Biquad.highShelf(fs, 3000.0, 3.0)) })),
         // ---------------- 노래·음악
         VoicePreset("choir", "합창단 (하모니)", "노래", "내 목소리에 3도·5도·옥타브 아래 화음을 얹음",
-            VoiceChain(listOf(VoiceCfg(gain = 0.6f), VoiceCfg(semitones = 4f, gain = 0.5f, delayMs = 12f), VoiceCfg(semitones = 7f, gain = 0.45f, delayMs = 24f),
-                VoiceCfg(semitones = -12f, gain = 0.35f, delayMs = 8f)),
+            VoiceChain(listOf(VoiceCfg(gain = 0.6f, driftCents = 6f), VoiceCfg(semitones = 4f, gain = 0.5f, delayMs = 12f, driftCents = 8f, formant = 1.03f), VoiceCfg(semitones = 7f, gain = 0.45f, delayMs = 24f, driftCents = 8f, formant = 0.97f),
+                VoiceCfg(semitones = -12f, gain = 0.35f, delayMs = 8f, driftCents = 6f, formant = 0.95f)),
                 fx = { fs -> listOf(Reverb(fs, 0.6f, 0.4f, 0.3f)) })),
         VoicePreset("duet", "이중창 (옥타브)", "노래", "한 옥타브 위 목소리를 함께",
-            VoiceChain(listOf(VoiceCfg(gain = 0.7f), VoiceCfg(semitones = 12f, formant = 1.1f, gain = 0.5f, delayMs = 10f)))),
+            VoiceChain(listOf(VoiceCfg(gain = 0.7f, driftCents = 5f), VoiceCfg(semitones = 12f, formant = 1.1f, gain = 0.5f, delayMs = 10f, driftCents = 7f)))),
         VoicePreset("autotune_hard", "오토튠 (강하게)", "노래", "음을 가장 가까운 반음에 딱 맞춤 (팝 보컬 효과)",
-            VoiceChain(listOf(VoiceCfg(snap = 1f)), fx = { fs -> listOf(Reverb(fs, 0.4f, 0.5f, 0.1f)) })),
+            VoiceChain(listOf(VoiceCfg(snap = 1f, retuneMs = 6f)), fx = { fs -> listOf(Reverb(fs, 0.4f, 0.5f, 0.1f)) })),
         VoicePreset("autotune_soft", "오토튠 (부드럽게)", "노래", "음정이 조금 더 맞게 살짝 끌어당김",
-            VoiceChain(listOf(VoiceCfg(snap = 0.55f)))),
+            VoiceChain(listOf(VoiceCfg(snap = 0.55f, retuneMs = 70f)))),
         VoicePreset("opera", "오페라 (비브라토)", "노래", "깊은 떨림과 큰 홀 울림",
-            VoiceChain(listOf(VoiceCfg(vibratoHz = 5.5f, vibratoCents = 45f)), fx = { fs -> listOf(Reverb(fs, 0.85f, 0.35f, 0.3f)) })),
+            VoiceChain(listOf(VoiceCfg(vibratoHz = 5.5f, vibratoCents = 45f, vibratoOnsetMs = 160f)), fx = { fs -> listOf(Reverb(fs, 0.85f, 0.35f, 0.3f)) })),
         VoicePreset("nervous", "떨리는 목소리", "노래", "겁먹은 듯 떨리는 소리",
-            VoiceChain(listOf(VoiceCfg(vibratoHz = 7f, vibratoCents = 30f)), fx = { fs -> listOf(Tremolo(fs, 6f, 0.25f)) })),
+            VoiceChain(listOf(VoiceCfg(vibratoHz = 7f, vibratoCents = 30f, vibratoOnsetMs = 80f)), fx = { fs -> listOf(Tremolo(fs, 6f, 0.25f)) })),
         VoicePreset("doubler", "더블링 (목소리 두 배)", "노래", "같은 목소리를 아주 조금 다르게 겹쳐 두껍게",
-            VoiceChain(listOf(VoiceCfg(gain = 0.7f), VoiceCfg(semitones = 0.12f, gain = 0.55f, delayMs = 18f)))),
+            VoiceChain(listOf(VoiceCfg(gain = 0.7f, driftCents = 4f), VoiceCfg(semitones = 0.12f, gain = 0.55f, delayMs = 18f, driftCents = 6f)))),
         VoicePreset("chorus", "코러스 (여럿이 부르는)", "노래", "목소리가 여러 명인 듯 퍼짐",
             VoiceChain(emptyList(), dry = 1f, fx = { fs -> listOf(Chorus(fs, floatArrayOf(12f, 18f, 25f), 3f, 0.8f, 0.7f)) })),
         // ---------------- 효과
@@ -142,6 +185,6 @@ object VoicePresets {
                 listOf(hp(fs, 80.0), Biquad.lowShelf(fs, 150.0, 4.0), Biquad.peak(fs, 3000.0, 1.0, 3.0), Compressor(fs, -24f, 3f, 6f)) })),
     )
 
-    val GROUPS = listOf("여성", "남성", "캐릭터", "노래", "효과")
+    val GROUPS = listOf("여성", "소녀", "뉴스 여성", "남성", "뉴스 남성", "캐릭터", "노래", "효과")
     fun byId(id: String) = ALL.firstOrNull { it.id == id }
 }

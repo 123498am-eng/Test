@@ -27,7 +27,7 @@ class ToolsActivity : ColumnActivity() {
         entries += Entry("정밀 얼굴 분석", "정밀 얼굴 스캔", "주름(부위별·잔주름)·모공·잡티·홍조·번들거림·다크서클·톤·피부결·대칭·비율·얼굴형·치수·표정 52가지") { Intent(this, FaceScanActivity::class.java) }
         entries += Entry("정밀 얼굴 분석", "얼굴 비교", "두 사진 속 사람이 얼마나 닮았는지 %와 같은 사람인지 판정 (기준 사진 여러 장 가능, 카메라로 찍기)") { Intent(this, FaceCompareActivity::class.java) }
         entries += Entry("정밀 얼굴 분석", "3D 얼굴 (실시간 카메라)", "카메라로 얼굴 3D 모델 만들기") { Intent(this, LiveActivity::class.java) }
-        entries += Entry("음성", "실시간 음성 변조", "여성 7가지를 포함한 48가지 목소리·효과 (음높이와 목소리 굵기를 따로 바꿔 자연스럽게), 녹음·공유") { Intent(this, VoiceChangerActivity::class.java) }
+        entries += Entry("음성", "실시간 음성 변조", "여성·귀여운 소녀 4가지·뉴스 아나운서 여성/남성 5가지씩 등 60가지 목소리·효과 (음높이와 목소리 굵기를 따로 바꿔 자연스럽게), 녹음·공유") { Intent(this, VoiceChangerActivity::class.java) }
         photo("얼굴 보정", "skin_smooth", "spot_remove", "teeth", "eye_big", "face_slim", "lip", "symmetry")
         photo("인물·증명사진", "portrait", "id_photo")
         photo("개인정보 보호", "mosaic", "plate_blur", "exif")

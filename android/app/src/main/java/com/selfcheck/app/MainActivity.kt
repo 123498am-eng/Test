@@ -127,7 +127,7 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(this, PlateActivity::class.java))
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
-        root.addView(button("실시간 음성 변조 (여성 목소리 · 48가지)") {
+        root.addView(button("실시간 음성 변조 (소녀·뉴스 아나운서 · 60가지)") {
             startActivity(Intent(this, VoiceChangerActivity::class.java))
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 

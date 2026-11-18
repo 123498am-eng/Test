@@ -196,7 +196,11 @@ class PitchTracker(val fs: Int, private val ring: AudioRing) {
 
     private fun idx(k: Int) = k % FR
 
-    /** 입력 시간 t 에서의 주기 (표본 수). 무성음·무음이면 0 */
+    /**
+     * 입력 시간 t 에서의 주기 (표본 수). 무성음·무음이면 0.
+     * 이웃 프레임(앞뒤 2개)의 중앙값에서 8% 넘게 벗어난 값(옥타브 튐·추정 잡음)은 버리고, 남은 값을 가까울수록 큰 비중으로 평균합니다.
+     * 말할 때 음높이는 부드럽게 변하므로 추정 잡음만 줄고 억양의 움직임은 거의 그대로 남습니다.
+     */
     fun periodAt(t: Long): Float {
         var k = nFrames - 1
         val oldest = max(0, nFrames - FR + 1)
@@ -204,12 +208,31 @@ class PitchTracker(val fs: Int, private val ring: AudioRing) {
         if (k < oldest) return 0f
         val p = fPeriod[idx(k)]
         if (p <= 0f) return 0f
-        if (k - 1 >= oldest && k + 1 < nFrames) {
-            val a = fPeriod[idx(k - 1)]; val c = fPeriod[idx(k + 1)]
-            if (a > 0f && c > 0f) return median3(a, p, c)
+        var cnt = 0
+        for (d in -2..2) {
+            val j = k + d
+            if (j < oldest || j >= nFrames) continue
+            val v = fPeriod[idx(j)]
+            if (v > 0f) { sm[cnt] = v; cnt++ }
         }
-        return p
+        if (cnt < 3) return p
+        for (i in 0 until cnt) srt[i] = sm[i]
+        java.util.Arrays.sort(srt, 0, cnt)
+        val med = srt[cnt / 2]
+        var sum = 0f; var wsum = 0f
+        for (d in -2..2) {
+            val j = k + d
+            if (j < oldest || j >= nFrames) continue
+            val v = fPeriod[idx(j)]
+            if (v <= 0f || abs(v / med - 1f) > 0.08f) continue
+            val w = (3 - abs(d)).toFloat()
+            sum += v * w; wsum += w
+        }
+        return if (wsum > 0f) sum / wsum else med
     }
+
+    private val sm = FloatArray(5)
+    private val srt = FloatArray(5)
 
     private fun median3(a: Float, b: Float, c: Float) = max(min(a, b), min(max(a, b), c))
 }
@@ -233,6 +256,12 @@ class VoiceCfg(
     val vibratoHz: Float = 0f,
     val vibratoCents: Float = 0f,
     val delayMs: Float = 0f,
+    /** 여러 겹일 때 겹마다 조금씩 다르게 흘러가는 느린 음높이 흔들림 (센트) */
+    val driftCents: Float = 0f,
+    /** 음정 보정이 목표에 따라붙는 시간 상수 (ms). 작을수록 딱딱한 오토튠 */
+    val retuneMs: Float = 20f,
+    /** 목소리가 시작되고 떨림이 서서히 생기기까지 (ms) — 사람의 비브라토는 소리를 내자마자 나오지 않음 */
+    val vibratoOnsetMs: Float = 120f,
 )
 
 /** 위의 설정에 따라 음높이·굵기를 바꾸는 한 겹 (PSOLA) */
@@ -244,7 +273,6 @@ class PsolaVoice(private val fs: Int, private val ring: AudioRing, private val t
     private val wgt = FloatArray(outSize)
     /** 다음에 놓을 조각의 가운데 (입력 시간축과 같은 시간축) */
     private var s = startTimeline.toDouble() - cfg.delayMs * fs / 1000.0
-    private var prevCenter = -1L
     private val unvoicedHop = (fs * 0.010).toInt()
     private val lMax = (fs * 0.0225).toInt()          // 조각 반길이 상한 (약 22ms)
     private val tMin = fs / 650f
@@ -253,9 +281,32 @@ class PsolaVoice(private val fs: Int, private val ring: AudioRing, private val t
     var grains = 0; private set
     private var lastLOut = 200
     @Volatile var lastOutHz = 0f
+    // 자연스러움을 위한 상태
+    private var betaSm = 0f
+    private var voicedRun = 0.0                       // 지금까지 이어진 유성음 길이 (표본)
+    private var vibPhase = 0.0
+    private var snapMidi = Float.NaN
+    private val seed = (cfg.hashCode() * 2654435761L.toInt()) and 0x7fffffff
+    private val driftPh1 = ((seed % 1000) / 1000.0) * 2 * PI
+    private val driftPh2 = (((seed / 1000) % 1000) / 1000.0) * 2 * PI
 
     // 정렬용 임시 배열
     private val refSeg = FloatArray(4096)
+
+    // 주기 표식(파형 보간용): pm = 바로 앞 주기의 표식, am = 뒤 주기의 표식, v = 둘 사이 위치 (1 이면 am 그대로)
+    private var pm = 0.0
+    private var am = 0.0
+    private var v = 1.0
+    private var marksValid = false
+
+    /** 시험용: 조각마다 (시각 초, 입력 추정 Hz, 의도한 출력 Hz, 유성 여부) 를 알려 줌 */
+    var trace: ((Double, Float, Float, Boolean) -> Unit)? = null
+
+    /** 시험용: 조각 반길이 상한 (입력 주기의 배수) */
+    var maxWindow = 1.6f
+
+    /** 인터폴레이션을 끄면 가장 가까운 한 주기를 그대로 반복해 붙이는 기존 PSOLA */
+    var interpolate = true
 
     fun render() {
         val lastC = tracker.lastCenter
@@ -273,20 +324,62 @@ class PsolaVoice(private val fs: Int, private val ring: AudioRing, private val t
                 beta *= alpha0.pow(cfg.formantLink)
             }
             beta = beta.coerceIn(0.6f, 1.7f)
-            val lOut = min(lMax.toFloat(), max(tIn / beta, tOut)).roundToInt().coerceAtLeast(8)
+            // 목소리 굵기는 음높이 추정이 조금 흔들려도 같이 출렁이지 않게 부드럽게 따라가기 (조각 몇 개에 걸쳐)
+            betaSm = if (betaSm == 0f || !voiced) beta else betaSm + 0.25f * (beta - betaSm)
+            beta = betaSm
+            // 조각 반길이: 새 주기 이상이어야 이어 붙일 때 빈틈이 없고, 너무 길면 입력 주기를 여러 개 품어 음높이가 흐려짐 (한 옥타브 넘게 낮출 때)
+            val lOut = min(lMax.toFloat(), max(tIn / beta, min(tOut, maxWindow * tIn / beta))).roundToInt().coerceAtLeast(8)
             val lIn = beta * lOut
-            val need = s + tIn / 2 + lIn + 6
-            if (need > ring.n - 1) break
 
-            var a = s
-            if (voiced && prevCenter >= 0 && s - prevCenter < 4 * tIn) a = align(s, tIn, prevCenter)
-            place(a, s, lOut, beta)
+            if (!voiced) {
+                if (s + tIn / 2 + lIn + 6 > ring.n - 1) break
+                marksValid = false; hadMarks = false
+                place(s, s, 1.0, s, lOut, beta)
+                lastLOut = lOut
+                s += tOut; grains++
+                voicedRun = 0.0; snapMidi = Float.NaN
+                continue
+            }
+
+            // ---- 유성음: 주기 표식 준비
+            if (marksValid && abs(pm + v * (am - pm) - s) > 0.75 * tIn) marksValid = false // 어긋나면 다시 잡기
+            if (!marksValid) {
+                if (s + tIn / 2 + lIn + 6 + tIn / 5 > ring.n - 1) break
+                am = if (hadMarks) findMark(s, am.toLong(), tIn, (tIn / 2).toInt().coerceAtLeast(8)) else s
+                pm = findMark(am - tIn, am.toLong(), tIn, (tIn / 5).toInt().coerceAtLeast(4))
+                v = 1.0; marksValid = true; hadMarks = true
+            }
+            // 위치가 다음 주기를 넘어갔으면 표식을 한 칸씩 앞으로 (뒤 주기의 표식은 앞 표식에서 한 주기쯤 뒤에서 파형이 가장 비슷한 곳)
+            var starved = false
+            while (v > 1.0) {
+                if (am + 1.35 * tIn + lIn + 6 > ring.n - 1) { starved = true; break }
+                val d1 = am - pm
+                val nm = findMark(am + tIn, am.toLong(), tIn, (tIn / 5).toInt().coerceAtLeast(4))
+                val d2 = nm - am
+                if (d2 < tIn * 0.5) { marksValid = false; break }
+                v = (v - 1.0) * d1 / d2
+                pm = am; am = nm
+            }
+            if (starved) break
+            if (!marksValid) continue
+            if (am + lIn + 6 > ring.n - 1) break
+
+            place(pm, am, if (interpolate) v else 1.0, s, lOut, beta)
+            trace?.invoke(s / fs, fIn, fs / tOut, true)
             lastLOut = lOut
-            prevCenter = if (voiced) a.toLong() else -1L
+            v += tOut / (am - pm).coerceAtLeast(1.0)
             s += tOut
             grains++
-            if (voiced) lastOutHz = fs / tOut
+            lastOutHz = fs / tOut; voicedRun += tOut
         }
+    }
+
+    private var hadMarks = false
+
+    /** 지금 설정에서 목소리 굵기 배율의 대략값 (숨소리가 같은 배율로 움직이게) */
+    fun nominalBeta(): Float {
+        val alpha = if (cfg.targetHz > 0f) cfg.targetHz / tracker.userF0 else 2f.pow((cfg.semitones + ctl.semitoneOffset) / 12f)
+        return (ctl.formantScale * cfg.formant * alpha.coerceIn(0.3f, 3.5f).pow(cfg.formantLink)).coerceIn(0.6f, 1.7f)
     }
 
     /** (출력 음높이 Hz, 음높이를 바꾼 비율 — 목소리 굵기 연동용: 떨림·음정보정은 뺀 값) */
@@ -297,65 +390,89 @@ class PsolaVoice(private val fs: Int, private val ring: AudioRing, private val t
         f *= 2f.pow((cfg.semitones + ctl.semitoneOffset) / 12f)
         if (cfg.monotoneHz > 0f) f = cfg.monotoneHz
         val alpha0 = (f / fIn).coerceIn(0.3f, 3.5f)
+        val dt = (fs / f) / fs.toFloat()
         if (cfg.snap > 0f) {
+            // 가장 가까운 반음으로 끌어당기되, 목표가 바뀌면 retuneMs 시간 상수로 따라가서 딱딱한 계단이 아니라 짧은 미끄러짐이 되게
             val midi = 69f + 12f * ln(f / 440f) / LN2
-            val snapped = floor(midi + 0.5f)
-            f = 440f * 2f.pow((midi + cfg.snap * (snapped - midi) - 69f) / 12f)
+            val target = midi + cfg.snap * (floor(midi + 0.5f) - midi)
+            snapMidi = if (snapMidi.isNaN()) target else snapMidi + (target - snapMidi) * (1f - exp(-dt / (cfg.retuneMs / 1000f).coerceAtLeast(0.002f)))
+            f = 440f * 2f.pow((snapMidi - 69f) / 12f)
         }
-        if (cfg.vibratoCents > 0f) f *= 2f.pow(cfg.vibratoCents / 1200f * sin(2.0 * PI * cfg.vibratoHz * s / fs).toFloat())
+        var cents = 0f
+        if (cfg.vibratoCents > 0f) {
+            // 비브라토: 소리가 시작되고 vibratoOnsetMs 뒤부터 서서히 커지고, 속도와 깊이가 느리게 조금씩 흔들림
+            val tSec = (s / fs).toFloat()
+            val rate = cfg.vibratoHz * (1f + 0.045f * sin(2 * PI * 0.37 * tSec + driftPh1).toFloat() + 0.03f * sin(2 * PI * 0.91 * tSec + driftPh2).toFloat())
+            vibPhase += 2 * PI * rate * dt
+            val onset = ((voicedRun / fs * 1000.0 - cfg.vibratoOnsetMs) / 250.0).coerceIn(0.0, 1.0).toFloat()
+            val ramp = onset * onset * (3f - 2f * onset)
+            val depth = cfg.vibratoCents * (1f + 0.12f * sin(2 * PI * 0.23 * tSec + driftPh2).toFloat())
+            cents += depth * ramp * sin(vibPhase).toFloat()
+        }
+        if (cfg.driftCents > 0f) {
+            val tSec = (s / fs)
+            cents += cfg.driftCents * (0.6f * sin(2 * PI * 0.31 * tSec + driftPh1).toFloat() + 0.4f * sin(2 * PI * 0.77 * tSec + driftPh2).toFloat())
+        }
+        if (cents != 0f) f *= 2f.pow(cents / 1200f)
         return f.coerceIn(60f, 800f) to alpha0
     }
 
-    /** 앞 조각과 파형이 가장 비슷한 가운데 위치를 s 근처에서 찾기 */
-    private fun align(s0: Double, tIn: Float, prev: Long): Double {
+    /** ref 를 가운데로 한 한 주기 길이 조각과 파형이 가장 비슷한 가운데 위치를 c0 ± range 에서 찾기 (못 찾으면 c0) */
+    private fun findMark(c0: Double, ref: Long, tIn: Float, range: Int): Double {
         val m = (tIn / 2).toInt().coerceIn(8, 1500)
         val st = max(1, m / 50)
         var refE = 0.0
         var cnt = 0
         var i = -m
-        while (i <= m) { val v = ring.get(prev + i); refSeg[cnt++] = v; refE += v * v; i += st }
-        if (refE < 1e-9) return s0
-        val c0 = s0.toLong()
-        var best = c0; var bestV = -2.0
-        var c = c0 - m
-        while (c <= c0 + m) {
+        while (i <= m) { val x = ring.get(ref + i); refSeg[cnt++] = x; refE += x * x; i += st }
+        if (refE < 1e-9) return c0
+        val ci = c0.toLong()
+        var best = ci; var bestV = -2.0
+        var c = ci - range
+        while (c <= ci + range) {
             var sab = 0.0; var sbb = 0.0
             var k = 0; i = -m
-            while (i <= m) { val v = ring.get(c + i); sab += refSeg[k++] * v; sbb += v * v; i += st }
+            while (i <= m) { val x = ring.get(c + i); sab += refSeg[k++] * x; sbb += x * x; i += st }
             val sc = sab / sqrt(refE * sbb + 1e-12)
             if (sc > bestV) { bestV = sc; best = c }
             c += st
         }
         if (st > 1) { // 촘촘하게 다시
-            val lo = best - st; val hi = best + st
-            var c2 = lo
+            var c2 = best - st
             var bv = -2.0; var bb = best
-            while (c2 <= hi) {
+            while (c2 <= best + st) {
                 var sab = 0.0; var sbb = 0.0; var saa = 0.0
                 i = -m
-                while (i <= m) { val a = ring.get(prev + i); val v = ring.get(c2 + i); sab += a * v; saa += a * a; sbb += v * v; i += 2 }
+                while (i <= m) { val a = ring.get(ref + i); val x = ring.get(c2 + i); sab += a * x; saa += a * a; sbb += x * x; i += 2 }
                 val sc = sab / sqrt(saa * sbb + 1e-12)
                 if (sc > bv) { bv = sc; bb = c2 }
                 c2++
             }
             best = bb
         }
-        return if (bestV < 0.2) s0 else best.toDouble()
+        return if (bestV < 0.2) c0 else best.toDouble()
     }
 
-    /** 입력의 a 를 가운데로 한 조각을 β 배 속도로 읽어 출력 시간축의 s 에 붙이기 */
-    private fun place(a: Double, sCenter: Double, lOut: Int, beta: Float) {
+    /**
+     * 두 표식(pm, am) 사이 위치 v 의 조각을 만들어 출력 시간축의 sCenter 에 붙이기.
+     * 조각은 (1-v)·pm 주기 + v·am 주기: 음높이를 올릴 때 같은 주기를 그대로 되풀이하지 않고 이웃한 주기를 섞어서
+     * 입력의 원래 음높이로 웅웅거리는 소리(되풀이 잡음)를 줄입니다. 각 주기는 자기 표식이 가운데라서 펄스 위치는 어긋나지 않습니다.
+     */
+    private fun place(pmk: Double, amk: Double, vv: Double, sCenter: Double, lOut: Int, beta: Float) {
         val si = sCenter.roundToInt()
         val frac = sCenter - si
         val inv = (PI / lOut).toFloat()
+        val w1 = vv.toFloat(); val w0 = 1f - w1
+        val blend = w0 > 0.002f
         for (t in -lOut..lOut) {
             val rel = t - frac
             val x = rel.toFloat()
             if (abs(x) >= lOut) continue
             val win = 0.5f + 0.5f * kotlin.math.cos(inv * x)
-            val v = ring.at(a + beta * rel)
+            var sample = ring.at(amk + beta * rel)
+            if (blend) sample = sample * w1 + ring.at(pmk + beta * rel) * w0
             val j = ((si + t).toLong() and outMask).toInt()
-            acc[j] += v * win
+            acc[j] += sample * win
             wgt[j] += win
         }
     }
@@ -384,7 +501,12 @@ class VoiceControls {
 
 // ---------------------------------------------------------------- 속삭임 (LPC 잡음 합성)
 
-class Whisper(private val fs: Int, private val ring: AudioRing) {
+/**
+ * 속삭임·숨소리: 입력의 스펙트럼 모양(LPC)을 따라가는 잡음.
+ * beta: 목소리 굵기 이동 배율 — 목소리(PSOLA)와 같은 배율로 스펙트럼을 옮겨서, 숨소리가 원래 목소리의 굵기에 머물러 따로 노는 일이 없게 함.
+ * tilt: 되돌릴 때의 고음 보정 (0.95 = 입력 그대로, 작을수록 고음이 많은 바람 소리)
+ */
+class Whisper(private val fs: Int, private val ring: AudioRing, private val beta: () -> Float = { 1f }, private val tilt: Double = 0.95) {
     private val order = 24
     private val frame = (fs * 0.025).toInt()
     private val hop = (fs * 0.010).toInt()
@@ -402,9 +524,10 @@ class Whisper(private val fs: Int, private val ring: AudioRing) {
 
     private fun update(center: Long) {
         var mean = 0.0
+        val b = beta().toDouble()
         for (i in 0 until frame) {
             val w = 0.5 - 0.5 * kotlin.math.cos(2 * PI * (i + 0.5) / frame)
-            val v = ring.get(center - frame / 2 + i).toDouble()
+            val v = ring.at(center + b * (i - frame / 2)).toDouble() // β 배 빠르게 읽으면 스펙트럼 모양이 β 배 높은 쪽으로 이동
             buf[i] = v * w; mean += v * v
         }
         // 고음 강조 (0.95)
@@ -444,7 +567,7 @@ class Whisper(private val fs: Int, private val ring: AudioRing) {
         for (i in order - 1 downTo 1) hist[i] = hist[i - 1]
         hist[0] = x
         // 앞서 고음을 강조해서(프리엠퍼시스) 분석했으므로 되돌리고(디엠퍼시스), 직류 성분 제거
-        deemph = x + 0.95 * deemph
+        deemph = x + tilt * deemph
         val y = deemph - hpPrev + 0.995 * hpOut
         hpPrev = deemph; hpOut = y
         return y.toFloat()
@@ -498,14 +621,18 @@ class FilterChain(private val parts: List<Biquad>) : Fx() {
     override fun process(b: FloatArray, n: Int, amt: Float) { for (p in parts) p.process(b, n, amt) }
 }
 
-class Echo(fs: Int, delayMs: Float, private val feedback: Float, private val mix: Float) : Fx() {
+/** 에코: 되풀이될 때마다 고음이 줄어(damp) 점점 어두워지는, 실제 메아리 같은 소리 */
+class Echo(fs: Int, delayMs: Float, private val feedback: Float, private val mix: Float, private val damp: Float = 0.25f) : Fx() {
     private val buf = FloatArray(max(2, (fs * delayMs / 1000f).toInt()))
     private var pos = 0
+    private var lpState = 0f
     override fun process(b: FloatArray, n: Int, amt: Float) {
         val m = (mix * amt).coerceIn(0f, 1.2f)
+        val k = 1f - damp
         for (i in 0 until n) {
             val dl = buf[pos]; val x = b[i]
-            buf[pos] = x + feedback * dl
+            lpState += k * (dl - lpState)
+            buf[pos] = x + feedback * lpState
             pos = if (pos + 1 == buf.size) 0 else pos + 1
             b[i] = x + m * dl
         }
@@ -513,7 +640,7 @@ class Echo(fs: Int, delayMs: Float, private val feedback: Float, private val mix
 }
 
 /** 프리버브 방식 잔향 */
-class Reverb(fs: Int, room: Float, damp: Float, private val wet: Float) : Fx() {
+class Reverb(fs: Int, room: Float, damp: Float, private val wet: Float, preDelayMs: Float = 14f) : Fx() {
     private val sc = fs / 44100.0
     private val combTune = intArrayOf(1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617)
     private val apTune = intArrayOf(556, 441, 341, 225)
@@ -524,11 +651,18 @@ class Reverb(fs: Int, room: Float, damp: Float, private val wet: Float) : Fx() {
     private val apPos = IntArray(4)
     private val fb = room * 0.28f + 0.7f
     private val d1 = damp * 0.4f
+    // 프리딜레이: 소리가 나고 잔향이 시작되기까지의 짧은 지연 (실제 공간의 특징이며 말소리가 번지는 것을 줄임)
+    private val pre = FloatArray(max(1, (fs * preDelayMs / 1000f).toInt()))
+    private var prePos = 0
+    private var wetLp = 0f
 
     override fun process(b: FloatArray, n: Int, amt: Float) {
         val w = (wet * amt).coerceIn(0f, 1f)
         for (i in 0 until n) {
-            val x = b[i]; val inp = x * 0.015f
+            val x = b[i]
+            val inp = pre[prePos] * 0.015f
+            pre[prePos] = x
+            prePos = if (prePos + 1 == pre.size) 0 else prePos + 1
             var o = 0f
             for (c in 0 until 8) {
                 val buf = combs[c]; val p = combPos[c]
@@ -545,7 +679,8 @@ class Reverb(fs: Int, room: Float, damp: Float, private val wet: Float) : Fx() {
                 o = bo - o
                 apPos[a] = if (p + 1 == buf.size) 0 else p + 1
             }
-            b[i] = x * (1 - 0.5f * w) + o * 3f * w
+            wetLp += 0.62f * (o - wetLp) // 잔향의 아주 높은 소리는 공기에 흡수돼 줄어듦
+            b[i] = x * (1 - 0.5f * w) + wetLp * 3f * w
         }
     }
 }
@@ -673,6 +808,8 @@ class VoiceChain(
     val outGain: Float = 1f,
     /** 출력 음량을 입력에 맞출지 (원음 통과는 끔) */
     val matchLevel: Boolean = true,
+    /** 숨소리 성분의 고음 정도 (0.95 = 입력 그대로, 작을수록 바람 소리처럼 고음이 많음) */
+    val breathTilt: Double = 0.95,
 )
 
 class VoiceEngine(val fs: Int) {
@@ -695,12 +832,17 @@ class VoiceEngine(val fs: Int) {
     var blocks = 0L; private set
     val underruns get() = (cur?.voices?.sumOf { it.underruns } ?: 0)
     val outHz get() = cur?.voices?.firstOrNull()?.lastOutHz ?: 0f
+    /** 시험용 */
+    val debugVoice: PsolaVoice? get() = cur?.voices?.firstOrNull()
 
     fun setChain(c: VoiceChain) { pending = c }
 
-    private fun build(c: VoiceChain, startTimeline: Long): Active =
-        Active(c, c.voices.map { PsolaVoice(fs, ring, tracker, it, controls, startTimeline) },
-            if (c.whisper > 0f) Whisper(fs, ring) else null, c.fx(fs), if (c.matchLevel) LevelMatch(fs) else null)
+    private fun build(c: VoiceChain, startTimeline: Long): Active {
+        val voices = c.voices.map { PsolaVoice(fs, ring, tracker, it, controls, startTimeline) }
+        val first = voices.firstOrNull()
+        val wh = if (c.whisper > 0f) Whisper(fs, ring, { first?.nominalBeta() ?: controls.formantScale }, c.breathTilt) else null
+        return Active(c, voices, wh, c.fx(fs), if (c.matchLevel) LevelMatch(fs) else null)
+    }
 
     /** n 표본의 입력을 받아 n 표본의 출력을 만듭니다 (n ≤ 8192). 출력은 입력보다 latency 표본 늦습니다. */
     fun process(input: FloatArray, n: Int, out: FloatArray) {

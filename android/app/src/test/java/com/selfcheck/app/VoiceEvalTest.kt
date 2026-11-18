@@ -45,6 +45,67 @@ class VoiceEvalTest {
         }
     }
 
+    /** 자연스러움 측정용: /tmp/voice_eval/in2 의 여러 음성 x 대표 설정 → /tmp/voice_eval/out_(label.txt 의 이름) */
+    @Test fun benchmark() {
+        val inDir = File("/tmp/voice_eval/in2"); assumeTrue(inDir.isDirectory)
+        val label = File("/tmp/voice_eval/label.txt").readText().trim()
+        fun preset(id: String) = VoicePresets.byId(id)?.chain
+        val cfgs = listOf(
+            "bypass" to VoiceChain(listOf(VoiceCfg()), matchLevel = false),
+            "pitch_x1.5" to VoiceChain(listOf(VoiceCfg(semitones = 7.02f)), matchLevel = false),
+            "pitch_x2.0" to VoiceChain(listOf(VoiceCfg(semitones = 12f)), matchLevel = false),
+            "pitch_x0.7" to VoiceChain(listOf(VoiceCfg(semitones = -6.17f)), matchLevel = false),
+            "fem_natural" to preset("fem_natural")!!,
+            "child" to preset("child")!!,
+            "helium" to preset("helium")!!,
+            "male_deep" to preset("male_deep")!!,
+            "grandma" to preset("grandma")!!,
+            "opera" to preset("opera")!!,
+        )
+        for (f in inDir.listFiles { x -> x.name.endsWith(".wav") }!!.sortedBy { it.name }) {
+            val (fs, x) = VoiceTestUtil.readWav(f)
+            for ((name, chain) in cfgs) {
+                val e = VoiceEngine(fs); e.setChain(chain)
+                VoiceTestUtil.writeWav(File("/tmp/voice_eval/out_$label/${f.nameWithoutExtension}__$name.wav"), fs, VoiceTestUtil.run(e, x))
+            }
+        }
+    }
+
+    /** 조각마다 의도한 음높이를 저장 (엔진 의도 vs 출력에서 측정한 음높이 비교용) */
+    @Test fun traceDump() {
+        val inDir = File("/tmp/voice_eval/in2"); assumeTrue(inDir.isDirectory)
+        val label = File("/tmp/voice_eval/label.txt").readText().trim()
+        for (n in listOf("m_mid", "f_mid", "ko_m")) for ((cn, semi) in listOf("x1.5" to 7.02f, "x2.0" to 12f)) {
+            val (fs, x) = VoiceTestUtil.readWav(File(inDir, "$n.wav"))
+            val e = VoiceEngine(fs); e.setChain(VoiceChain(listOf(VoiceCfg(semitones = semi)), matchLevel = false))
+            val sb = StringBuilder()
+            val inb = FloatArray(480); val ob = FloatArray(480)
+            val padded = x + FloatArray(((x.size + e.latency + 479) / 480) * 480 - x.size)
+            val out = FloatArray(padded.size)
+            var p = 0
+            while (p + 480 <= padded.size) {
+                System.arraycopy(padded, p, inb, 0, 480)
+                e.process(inb, 480, ob)
+                if (p == 0) e.debugVoice?.trace = { t, fi, fo, v -> sb.append("$t,$fi,$fo,$v\n") }
+                System.arraycopy(ob, 0, out, p, 480); p += 480
+            }
+            File("/tmp/voice_eval/out_$label/trace_${n}_$cn.csv").writeText(sb.toString())
+            VoiceTestUtil.writeWav(File("/tmp/voice_eval/out_$label/trace_${n}_$cn.wav"), fs, out.copyOfRange(e.latency, e.latency + x.size))
+        }
+    }
+
+    /** 모든 프리셋 x in2 의 여러 음성 → /tmp/voice_eval/pres2 */
+    @Test fun presetsOnAllInputs() {
+        val inDir = File("/tmp/voice_eval/in2"); assumeTrue(inDir.isDirectory)
+        for (f in inDir.listFiles { x -> x.name.endsWith(".wav") }!!.sortedBy { it.name }) {
+            val (fs, x) = VoiceTestUtil.readWav(f)
+            for (p in VoicePresets.ALL) {
+                val e = VoiceEngine(fs); e.setChain(p.chain)
+                VoiceTestUtil.writeWav(File("/tmp/voice_eval/pres2/${f.nameWithoutExtension}__${p.id}.wav"), fs, VoiceTestUtil.run(e, x))
+            }
+        }
+    }
+
     @Test fun synthDump() {
         assumeTrue(File("/tmp/voice_eval").isDirectory)
         val fs = 44100
