@@ -102,8 +102,8 @@ class PersonActivity : ComponentActivity() {
         status = TextView(this).apply { text = "사람을 화면에 비춰 주세요"; setTextColor(Color.WHITE); textSize = 13f; gravity = Gravity.CENTER }
         bottom.addView(status)
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        fun btn(t: String, f: (Button) -> Unit) = Button(this).apply { text = t; textSize = 12f; setOnClickListener { f(this) } }
-            .also { bar.addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)) }
+        fun btn(t: String, f: (Button) -> Unit) = Button(this).apply { text = t; textSize = 12f; UiKit.styleButton(this, BtnStyle.ON_DARK, 12f, 8); setOnClickListener { f(this) } }
+            .also { bar.addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { setMargins(dp(3), 0, dp(3), 0) }) }
         btn("카메라 전환") { front = !front; resetCount = true; startCamera() }
         btn("누적 초기화") { resetCount = true }
         btn("뼈대: 켬") { b -> overlay.skeleton = !overlay.skeleton; b.text = if (overlay.skeleton) "뼈대: 켬" else "뼈대: 끔" }

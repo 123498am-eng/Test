@@ -28,69 +28,95 @@ import androidx.activity.ComponentActivity
 import kotlin.math.max
 import kotlin.math.min
 
-/** 세로로 쌓는 화면(글자·막대·버튼)의 공통 부품 */
+/** 세로로 쌓는 화면(글자·막대·버튼)의 공통 부품. 위쪽 고정 바(뒤로 가기 + 제목) 아래에 내용이 스크롤됩니다. */
 open class ColumnActivity : ComponentActivity() {
     lateinit var col: LinearLayout
     lateinit var scroll: ScrollView
+    lateinit var titleView: TextView
+    var subtitleView: TextView? = null
 
-    fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    fun dp(v: Int) = dip(v)
 
     fun setupColumn(title: String, subtitle: String? = null) {
-        col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(32)) }
-        scroll = ScrollView(this).apply { addView(col); setBackgroundColor(Color.WHITE) }
-        scroll.setOnApplyWindowInsetsListener { v, insets ->
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Pal.bg) }
+        val bar = UiKit.topBar(this, title, { finish() })
+        titleView = bar.getChildAt(1) as TextView
+        root.addView(bar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(4), dp(16), dp(32)) }
+        scroll = ScrollView(this).apply { addView(col); setBackgroundColor(Pal.bg); isVerticalScrollBarEnabled = false; clipToPadding = false }
+        root.addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+        root.setOnApplyWindowInsetsListener { v, insets ->
             @Suppress("DEPRECATION")
             v.setPadding(0, insets.systemWindowInsetTop, 0, insets.systemWindowInsetBottom); insets
         }
-        setContentView(scroll)
-        col.addView(TextView(this).apply { text = title; textSize = 22f; setTypeface(null, Typeface.BOLD); setTextColor(Color.BLACK) })
-        if (subtitle != null) col.addView(hint(subtitle))
+        setContentView(root)
+        if (subtitle != null) subtitleView = hint(subtitle).also { it.setPadding(dp(4), dp(2), dp(4), dp(8)); col.addView(it) }
     }
 
-    fun section(t: String) = TextView(this).apply {
-        text = t; textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(Color.BLACK); setPadding(0, dp(18), 0, dp(4))
+    fun section(t: String): View = UiKit.sectionTitle(this, t)
+    fun hint(t: String) = TextView(this).apply {
+        text = t; textSize = 13f; setTextColor(Pal.text2); setLineSpacing(0f, 1.1f)
+        breakStrategy = android.text.Layout.BREAK_STRATEGY_BALANCED
     }
-    fun hint(t: String) = TextView(this).apply { text = t; textSize = 13f; setTextColor(Color.DKGRAY) }
-    fun warn(t: String) = TextView(this).apply { text = t; textSize = 13f; setTextColor(Color.rgb(190, 90, 0)) }
+
+    /** 눈에 띄는 안내 상자 (warn=true 면 주황색 주의 상자) */
+    fun tip(t: String, warn: Boolean = false): View = TextView(this).apply {
+        text = t; textSize = 13f; setLineSpacing(0f, 1.15f); setPadding(dp(14), dp(12), dp(14), dp(12))
+        setTextColor(if (warn) 0xFF8A4B0B.toInt() else Pal.primaryDark)
+        background = UiKit.rounded(this@ColumnActivity, if (warn) Pal.warnSoft else Pal.primarySoft, 16f)
+        breakStrategy = android.text.Layout.BREAK_STRATEGY_BALANCED
+        layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) }
+    }
+    fun warn(t: String) = TextView(this).apply {
+        text = t; textSize = 13f; setTextColor(Pal.warn); setPadding(dp(12), dp(8), dp(12), dp(8))
+        background = UiKit.rounded(this@ColumnActivity, Pal.warnSoft, 12f)
+        layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) }
+    }
 
     fun rowView(label: String, value: String) = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(3), 0, dp(3))
-        addView(TextView(context).apply { text = label; textSize = 14f; setTextColor(Color.GRAY) }, LinearLayout.LayoutParams(dp(130), WRAP_CONTENT))
-        addView(TextView(context).apply { text = value; textSize = 14f; setTextColor(Color.BLACK) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(5), 0, dp(5))
+        addView(TextView(context).apply { text = label; textSize = 13.5f; setTextColor(Pal.text2) }, LinearLayout.LayoutParams(dp(130), WRAP_CONTENT))
+        addView(TextView(context).apply { text = value; textSize = 14.5f; setTextColor(Pal.text) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
     }
 
     /** 0~100 막대. lowIsGood=true 면 낮을수록 초록 */
     fun bar(label: String, value: Float?, text: String, lowIsGood: Boolean = true, onClick: (() -> Unit)? = null): View {
-        val v = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(4), 0, dp(4)) }
+        val v = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(6), 0, dp(6)) }
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        top.addView(TextView(this).apply { this.text = label; textSize = 14f; setTextColor(Color.BLACK) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
-        top.addView(TextView(this).apply { this.text = text; textSize = 13f; setTextColor(Color.DKGRAY) })
+        top.addView(TextView(this).apply { this.text = label; textSize = 14.5f; setTextColor(Pal.text) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        top.addView(TextView(this).apply { this.text = text; textSize = 13f; setTextColor(Pal.text2) })
         v.addView(top)
-        v.addView(BarView(this, value, lowIsGood), LinearLayout.LayoutParams(MATCH_PARENT, dp(8)).apply { topMargin = dp(3) })
+        v.addView(BarView(this, value, lowIsGood), LinearLayout.LayoutParams(MATCH_PARENT, dp(8)).apply { topMargin = dp(5) })
         if (onClick != null) v.setOnClickListener { onClick() }
         return v
     }
 
-    fun button(t: String, onClick: (Button) -> Unit) = Button(this).apply { text = t; isAllCaps = false; setOnClickListener { onClick(this) } }
+    fun button(t: String, onClick: (Button) -> Unit) = UiKit.button(this, t, BtnStyle.SOFT, 14.5f, onClick)
+    fun primaryButton(t: String, onClick: (Button) -> Unit) = UiKit.button(this, t, BtnStyle.PRIMARY, 15f, onClick)
     fun buttons(vararg items: Pair<String, (Button) -> Unit>) = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
-        items.forEach { (t, f) -> addView(button(t, f).apply { textSize = 13f }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)) }
+        items.forEachIndexed { i, (t, f) ->
+            addView(button(t, f).apply { textSize = 13.5f }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { if (i > 0) leftMargin = dp(8) })
+        }
     }
-    fun full(v: View, top: Int = 6) = col.addView(v, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(top) })
+    fun full(v: View, top: Int = 8) = col.addView(v, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(top) })
 
     fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_SHORT).show()
     fun copy(text: String, what: String = "내용") {
         getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(what, text)); toast("복사했습니다")
     }
-    fun card(): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(12))
-        background = GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setColor(Color.rgb(244, 246, 250)) }
+    fun card(): LinearLayout = UiKit.card(this)
+
+    /** 둥근 입력창 */
+    fun styleInput(e: android.widget.EditText) {
+        e.background = UiKit.rounded(this, Pal.surface, 14f, Pal.outline, 1)
+        e.setPadding(dp(14), dp(12), dp(14), dp(12)); e.textSize = 15f; e.setTextColor(Pal.text); e.setHintTextColor(Pal.text3)
     }
 }
 
 /** 0~100 값 막대 */
 class BarView(ctx: Context, private val value: Float?, private val lowIsGood: Boolean) : View(ctx) {
-    private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(230, 232, 236) }
+    private val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE3E8F4.toInt() }
     private val fg = Paint(Paint.ANTI_ALIAS_FLAG)
     override fun onDraw(c: Canvas) {
         val r = height / 2f
@@ -98,7 +124,7 @@ class BarView(ctx: Context, private val value: Float?, private val lowIsGood: Bo
         val v = value ?: return
         val t = (v / 100f).coerceIn(0f, 1f)
         val bad = if (lowIsGood) t else 1 - t
-        fg.color = when { bad < 0.33f -> Color.rgb(40, 170, 90); bad < 0.6f -> Color.rgb(240, 170, 30); else -> Color.rgb(225, 70, 60) }
+        fg.color = when { bad < 0.33f -> 0xFF22C55E.toInt(); bad < 0.6f -> 0xFFF59E0B.toInt(); else -> 0xFFEF4444.toInt() }
         c.drawRoundRect(RectF(0f, 0f, max(height.toFloat(), width * t), height.toFloat()), r, r, fg)
     }
 }
@@ -110,6 +136,11 @@ class ZoomImageView(ctx: Context) : View(ctx) {
     private var scale = 1f; private var tx = 0f; private var ty = 0f
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     var onTap: ((Float, Float) -> Unit)? = null
+
+    init {
+        background = GradientDrawable().apply { setColor(0xFF111426.toInt()); cornerRadius = ctx.dipf(18f) }
+        outlineProvider = android.view.ViewOutlineProvider.BACKGROUND; clipToOutline = true
+    }
 
     fun setImage(b: Bitmap?, keepView: Boolean = false) { bmp = b; if (!keepView) { scale = 1f; tx = 0f; ty = 0f }; invalidate() }
 

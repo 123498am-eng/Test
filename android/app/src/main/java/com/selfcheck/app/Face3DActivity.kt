@@ -72,8 +72,8 @@ class Face3DActivity : ComponentActivity() {
         }
         root.addView(hint)
         fun bar() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(2), dp(8), dp(2)) }
-        fun LinearLayout.btn(t: String, f: (Button) -> Unit) = Button(this@Face3DActivity).apply { text = t; textSize = 12f; setOnClickListener { f(this) } }
-            .also { addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)) }
+        fun LinearLayout.btn(t: String, f: (Button) -> Unit) = Button(this@Face3DActivity).apply { text = t; textSize = 12f; UiKit.styleButton(this, BtnStyle.ON_DARK, 12f, 8); setOnClickListener { f(this) } }
+            .also { addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { setMargins(dp(3), 0, dp(3), 0) }) }
 
         if (detail) {
             // 주름 강도

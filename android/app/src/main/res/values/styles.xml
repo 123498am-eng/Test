@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 앱 전체 테마: 밝은 배경, 보라 계열 강조색, 둥근 버튼. 화면마다 따로 꾸미지 않은 기본 위젯도 함께 예뻐짐 -->
+    <style name="Theme.SelfCheck" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">@color/sc_primary</item>
+        <item name="android:colorPrimaryDark">@color/sc_primary_dark</item>
+        <item name="android:colorAccent">@color/sc_primary</item>
+        <item name="android:colorControlActivated">@color/sc_primary</item>
+        <item name="android:colorControlHighlight">#334F46E5</item>
+        <item name="android:windowBackground">@color/sc_bg</item>
+        <item name="android:textColorPrimary">@color/sc_text</item>
+        <item name="android:textColorSecondary">@color/sc_text2</item>
+        <item name="android:textColorHint">@color/sc_text3</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:buttonStyle">@style/SC.Button</item>
+    </style>
+
+    <style name="SC.Button" parent="android:Widget.Material.Button">
+        <item name="android:background">@drawable/bg_btn_soft</item>
+        <item name="android:textColor">@color/btn_text_soft</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:minHeight">46dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:paddingLeft">14dp</item>
+        <item name="android:paddingRight">14dp</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+</resources>

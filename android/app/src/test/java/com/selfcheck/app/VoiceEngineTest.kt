@@ -212,4 +212,31 @@ class VoiceEngineTest {
             assertEquals("$id 미리 읽기 부족", 0, e.underruns)
         }
     }
+
+    @Test fun presetLabelsSplitIntoTitleAndSubtitle() {
+        assertEquals("아침 뉴스" to "밝고 경쾌 · 여성", VoicePresets.labels("아침 뉴스 · 밝고 경쾌 (여)"))
+        assertEquals("여성" to "자연스럽게", VoicePresets.labels("여성 (자연스럽게)"))
+        assertEquals("메인 뉴스 앵커" to "남성", VoicePresets.labels("메인 뉴스 앵커 (남)"))
+        assertEquals("굵은 저음" to null, VoicePresets.labels("굵은 저음"))
+        // 모든 프리셋 이름이 비어 있지 않은 제목으로 나뉨
+        assertTrue(VoicePresets.ALL.all { VoicePresets.labels(it.name).first.isNotBlank() })
+    }
+
+    @Test fun presetLabelsOmitGenderWhenCategoryAlreadySaysIt() {
+        assertEquals("아침 뉴스" to "밝고 경쾌", VoicePresets.labels("아침 뉴스 · 밝고 경쾌 (여)", withGender = false))
+        assertEquals("메인 뉴스 앵커" to null, VoicePresets.labels("메인 뉴스 앵커 (남)", withGender = false))
+        assertEquals("여성" to "자연스럽게", VoicePresets.labels("여성 (자연스럽게)", withGender = false))
+    }
+
+    @Test fun keepKoreanWordsOnlyBreaksAtSpaces() {
+        val s = keepKoreanWords("긴박하고 단호하게 · 여성")
+        // 한글 글자 사이에는 폭 없는 결합 문자, 점은 앞 낱말에 붙음
+        assertEquals("긴\u2060박\u2060하\u2060고 단\u2060호\u2060하\u2060게\u00A0· 여\u2060성", s)
+        // 보이는 글자는 그대로 (결합 문자·붙임 공백을 빼면 원문과 같음)
+        assertEquals("긴박하고 단호하게 · 여성", s.replace("\u2060", "").replace('\u00A0', ' '))
+        // 붙여 쓴 목록은 점 '뒤'에서만 줄이 바뀜 (점이 줄 맨 앞에 서지 않게)
+        assertEquals("모\u2060공\u2060\u00B7잡\u2060티\u2060\u00B7홍\u2060조", keepKoreanWords("모공·잡티·홍조"))
+        // 영문·숫자·기호는 건드리지 않음
+        assertEquals("3D OBJ 60가지".replace("가지", "가\u2060지"), keepKoreanWords("3D OBJ 60가지"))
+    }
 }

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 기본 버튼 모양: 연한 보라 바탕 + 둥근 모서리 + 눌렀을 때 물결 효과 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_enabled="false">
+        <shape android:shape="rectangle">
+            <solid android:color="#EEF0F6" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+    <item>
+        <ripple android:color="#334F46E5">
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/sc_primary_soft" />
+                    <corners android:radius="14dp" />
+                </shape>
+            </item>
+        </ripple>
+    </item>
+</selector>

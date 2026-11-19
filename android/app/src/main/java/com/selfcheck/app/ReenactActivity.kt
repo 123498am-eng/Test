@@ -158,10 +158,10 @@ class ReenactActivity : ComponentActivity() {
         col.addView(thumb, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
         bar.addView(Button(this).apply {
-            text = "사진/동영상 고르기"; setOnClickListener { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }
+            text = "사진/동영상 고르기"; UiKit.styleButton(this, BtnStyle.ON_DARK, 13f, 8); setOnClickListener { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }
         }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         bar.addView(Button(this).apply {
-            text = "편집"
+            text = "편집"; UiKit.styleButton(this, BtnStyle.PRIMARY, 14f, 8)
             setOnClickListener {
                 if (source == null) { Toast.makeText(this@ReenactActivity, "먼저 사진이나 동영상을 고르세요", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
                 if (ContextCompat.checkSelfPermission(this@ReenactActivity, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startLive()
@@ -223,8 +223,8 @@ class ReenactActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         bottom.addView(row)
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        fun btn(t: String, f: (Button) -> Unit) = Button(this).apply { text = t; textSize = 12f; setOnClickListener { f(this) } }
-            .also { bar.addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)) }
+        fun btn(t: String, f: (Button) -> Unit) = Button(this).apply { text = t; textSize = 12f; UiKit.styleButton(this, BtnStyle.ON_DARK, 12f, 8); setOnClickListener { f(this) } }
+            .also { bar.addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { setMargins(dp(3), 0, dp(3), 0) }) }
         btn("기준 표정 다시") { recalibrate = true }
         renderer.onTargetTone = { t -> targetTone = t }
         recBtn = btn("녹화") {

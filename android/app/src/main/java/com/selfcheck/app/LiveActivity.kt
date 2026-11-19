@@ -242,8 +242,8 @@ class LiveActivity : ComponentActivity() {
 
         fun bar() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         fun LinearLayout.btn(t: String, f: (Button) -> Unit) = Button(this@LiveActivity).apply {
-            text = t; textSize = 12f; setOnClickListener { f(this) }
-        }.also { addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)) }
+            text = t; textSize = 12f; UiKit.styleButton(this, BtnStyle.ON_DARK, 12f, 8); setOnClickListener { f(this) }
+        }.also { addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { setMargins(dp(3), 0, dp(3), 0) }) }
 
         val common = bar()
         modeBtn = common.btn("모드: 얼굴 3D") { setProductMode(!productMode) }

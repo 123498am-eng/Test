@@ -17,7 +17,7 @@
         android:name=".SelfCheckApp"
         android:label="셀프 점검"
         android:icon="@android:drawable/ic_menu_search"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:theme="@style/Theme.SelfCheck"
         android:allowBackup="false">
 
         <activity android:name=".MainActivity" android:exported="true">

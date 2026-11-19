@@ -48,27 +48,31 @@ class FaceCompareActivity : ColumnActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setupColumn("얼굴 비교", "사진 속 사람과 찍은(또는 첨부한) 사진 속 사람이 얼마나 닮았는지 %로 보여 주고, 같은 사람인지 판정합니다. 비교는 휴대폰 안에서만 합니다.")
-        col.addView(hint("다른 사람의 사진은 본인 동의를 받고 쓰세요. 결과는 추정이며 틀릴 수 있으니 중요한 판단(신분 확인 등)에 쓰지 마세요."))
+        col.addView(tip("다른 사람의 사진은 본인 동의를 받고 쓰세요. 결과는 추정이며 틀릴 수 있으니 중요한 판단(신분 확인 등)에 쓰지 마세요.", warn = true))
 
-        col.addView(section("1. 기준 사진 (이 사람)"))
-        col.addView(hint("같은 사람 사진을 여러 장(최대 5장) 넣으면 더 정확합니다."))
-        col.addView(buttons("사진 올리기" to { _ -> pickRefs.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+        val c1 = card()
+        c1.addView(UiKit.text(this, "1  기준 사진 (이 사람)", 16f, Pal.text, true))
+        c1.addView(hint("같은 사람 사진을 여러 장(최대 5장) 넣으면 더 정확해요.").apply { setPadding(0, dp(4), 0, dp(10)) })
+        c1.addView(buttons("사진 올리기" to { _ -> pickRefs.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
             "카메라로 찍기" to { _ -> camRef.takePhoto() }, "비우기" to { _ -> refs.clear(); refreshRows(); compare() }))
         refRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        col.addView(HorizontalScrollView(this).apply { addView(refRow) })
+        c1.addView(HorizontalScrollView(this).apply { addView(refRow); isHorizontalScrollBarEnabled = false }, UiKit.params(top = 8, ctx = this))
+        full(c1, 12)
 
-        col.addView(section("2. 비교할 사진"))
-        col.addView(buttons("카메라로 찍기" to { _ -> probeIn.takePhoto() }, "사진 첨부" to { _ -> probeIn.pickPhoto() }))
+        val c2 = card()
+        c2.addView(UiKit.text(this, "2  비교할 사진", 16f, Pal.text, true))
+        c2.addView(buttons("카메라로 찍기" to { _ -> probeIn.takePhoto() }, "사진 첨부" to { _ -> probeIn.pickPhoto() }), UiKit.params(top = 10, ctx = this))
         probeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        col.addView(probeRow)
+        c2.addView(probeRow, UiKit.params(top = 8, ctx = this))
+        full(c2, 12)
 
-        status = hint("")
+        status = hint("").apply { setPadding(dp(4), dp(8), 0, 0) }
         col.addView(status)
         result = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(result)
 
-        col.addView(section("사진 보기 · 얼굴 고르기"))
-        viewerHint = hint("사진에 얼굴이 여러 명이면 비교할 얼굴을 누르세요 (초록 상자 = 선택한 얼굴). 위의 작은 얼굴을 누르면 그 사진이 여기 나옵니다.")
+        col.addView(UiKit.sectionTitle(this, "사진 보기 · 얼굴 고르기"))
+        viewerHint = hint("사진에 얼굴이 여러 명이면 비교할 얼굴을 누르세요 (초록 상자 = 선택한 얼굴). 위의 작은 얼굴을 누르면 그 사진이 여기 나와요.")
         col.addView(viewerHint)
         viewer = ZoomImageView(this)
         viewer.onTap = { x, y -> pickFace(x, y) }
@@ -160,7 +164,7 @@ class FaceCompareActivity : ColumnActivity() {
         val pct = FaceSimilarity.percent(cos)
         val (level, verdict) = FaceSimilarity.verdict(cos)
         val each = rf.map { FaceSimilarity.cosine(it.feat, pf.feat) }
-        val color = when (level) { 3 -> Color.rgb(20, 140, 60); 2 -> Color.rgb(60, 140, 40); 1 -> Color.rgb(200, 120, 0); else -> Color.rgb(200, 40, 40) }
+        val color = when (level) { 3 -> Pal.good; 2 -> Pal.good; 1 -> Pal.warn; else -> Pal.bad }
 
         val card = card()
         val faces = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }

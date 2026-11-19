@@ -497,6 +497,8 @@ class VoiceControls {
     @Volatile var formantScale = 1f
     @Volatile var fxAmount = 1f
     @Volatile var inputGain = 1f
+    /** 변조된 소리에 내 원본 목소리를 섞는 크기 (0 = 끔). 효과 전용 프리셋은 원본이 효과의 재료라 영향 없음 */
+    @Volatile var originalLevel = 0f
 }
 
 // ---------------------------------------------------------------- 속삭임 (LPC 잡음 합성)
@@ -810,7 +812,10 @@ class VoiceChain(
     val matchLevel: Boolean = true,
     /** 숨소리 성분의 고음 정도 (0.95 = 입력 그대로, 작을수록 바람 소리처럼 고음이 많음) */
     val breathTilt: Double = 0.95,
-)
+) {
+    /** 목소리를 바꾸지 않고 원본에 효과만 입히는 프리셋 (에코·동굴·전화기 등): 원본 목소리가 곧 재료라 따로 끌 수 없음 */
+    val isEffectOnly: Boolean get() = voices.isEmpty() && whisper == 0f
+}
 
 class VoiceEngine(val fs: Int) {
     val controls = VoiceControls()
@@ -827,6 +832,7 @@ class VoiceEngine(val fs: Int) {
     private var xfLeft = 0
     private val xfLen = (fs * 0.03).toInt()
     private val tmpIn = FloatArray(8192)
+    private var origGain = 0f
     private val bufA = FloatArray(8192)
     private val bufB = FloatArray(8192)
     var blocks = 0L; private set
@@ -870,7 +876,14 @@ class VoiceEngine(val fs: Int) {
             }
             if (xfLeft <= 0) old = null
         }
-        for (i in 0 until n) out[i] = softLimit(bufA[i])
+        // 원본 목소리 섞기: 지연을 맞춘 원본을 출력에 더함 (켜고 끌 때 딸깍 소리가 나지 않게 약 5ms 에 걸쳐 서서히)
+        val og = controls.originalLevel
+        val k = 1f - exp(-1f / (0.005f * fs))
+        for (i in 0 until n) {
+            origGain += (og - origGain) * k
+            val orig = if (origGain > 0.0005f) origGain * ring.get(base + i) else 0f
+            out[i] = softLimit(bufA[i] + orig)
+        }
         blocks++
     }
 

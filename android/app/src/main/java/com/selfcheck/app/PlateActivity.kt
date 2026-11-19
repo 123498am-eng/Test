@@ -109,8 +109,8 @@ class PlateActivity : ComponentActivity() {
         }
         bottom.addView(status)
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        fun btn(t: String, f: (Button) -> Unit) = Button(this).apply { text = t; textSize = 12f; setOnClickListener { f(this) } }
-            .also { bar.addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)) }
+        fun btn(t: String, f: (Button) -> Unit) = Button(this).apply { text = t; textSize = 12f; UiKit.styleButton(this, BtnStyle.ON_DARK, 12f, 8); setOnClickListener { f(this) } }
+            .also { bar.addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { setMargins(dp(3), 0, dp(3), 0) }) }
         btn("목록 저장") { saveList(false) }
         btn("목록 비우기") {
             synchronized(found) { found.clear() }; overlay.list = emptyList()

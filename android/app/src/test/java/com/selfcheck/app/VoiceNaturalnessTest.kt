@@ -159,4 +159,47 @@ class VoiceNaturalnessTest {
         val corr = a.indices.sumOf { (a[it] - ma) * (b[it] - mb) } / sqrt(a.sumOf { (it - ma) * (it - ma) } * b.sumOf { (it - mb) * (it - mb) } + 1e-9)
         assertTrue("겹 사이 음높이 흔들림 상관 $corr", corr < 0.95)
     }
+
+    private fun corr(a: FloatArray, b: FloatArray, from: Int, n: Int): Double {
+        var ab = 0.0; var aa = 1e-12; var bb = 1e-12
+        for (i in from until from + n) { ab += a[i] * b[i]; aa += a[i] * a[i]; bb += b[i] * b[i] }
+        return ab / sqrt(aa * bb)
+    }
+
+    @Test fun originalVoiceCanBeMixedInOrLeftOut() {
+        val x = withNoise(vowel(4.0))
+        val cfg = VoiceChain(listOf(VoiceCfg(semitones = 5f)), matchLevel = false) // 완전 4도 위로 바꾼 소리 (옥타브 정수배는 펄스가 절반 겹쳐서 제외)
+        val off = VoiceTestUtil.run(engine(cfg), x)
+        val on = VoiceTestUtil.run(engine(cfg).also { it.controls.originalLevel = 1f }, x)
+        val cOff = corr(off, x, fs, 2 * fs); val cOn = corr(on, x, fs, 2 * fs)
+        // 끔: 변조된 소리만 (원본과 파형이 다름), 켬: 원본이 시간 맞춰 함께 들어 있어 원본과 뚜렷이 닮음
+        assertTrue("원본과의 상관 끔 $cOff / 켬 $cOn", cOff < 0.35 && cOn > 0.55 && cOn > cOff + 0.3)
+    }
+
+    @Test fun togglingOriginalMixMidSentenceDoesNotClick() {
+        val x = withNoise(vowel(3.0))
+        val e = engine(VoiceChain(listOf(VoiceCfg(semitones = 12f)), matchLevel = false))
+        val out = FloatArray(x.size); val ib = FloatArray(480); val ob = FloatArray(480)
+        var p = 0
+        while (p + 480 <= x.size) {
+            if (p == fs) e.controls.originalLevel = 1f            // 1초 지점에서 켜고
+            if (p == 2 * fs) e.controls.originalLevel = 0f        // 2초 지점에서 끔
+            System.arraycopy(x, p, ib, 0, 480); e.process(ib, 480, ob); System.arraycopy(ob, 0, out, p, 480); p += 480
+        }
+        for (at in listOf(fs, 2 * fs)) {
+            val seg = (at + e.latency - 200 until at + e.latency + 600)
+            var worst = 0f; for (i in seg) worst = max(worst, abs(out[i] - out[i - 1]))
+            assertTrue("켜고 끌 때 최대 변화 $worst", worst < 0.25f)
+        }
+    }
+
+    @Test fun effectOnlyPresetsAreTheOnesWhereOriginalCannotBeSwitchedOff() {
+        val effectOnly = VoicePresets.ALL.filter { it.chain.isEffectOnly }.map { it.id }.toSet()
+        for (id in listOf("dry", "echo", "cave", "cathedral", "bathroom", "telephone", "radio", "megaphone", "underwater", "flanger", "tremolo", "bitcrush", "studio", "chorus"))
+            assertTrue("$id 는 효과 전용", id in effectOnly)
+        for (id in listOf("fem_natural", "girl_thin", "news_m_anchor", "whisper", "demon", "choir", "robot"))
+            assertTrue("$id 는 목소리를 바꾸는 프리셋", id !in effectOnly)
+        // 목소리를 바꾸는 프리셋에는 고정으로 원본이 섞여 있지 않음 (원본 섞기는 화면 스위치로만)
+        assertTrue(VoicePresets.ALL.filter { !it.chain.isEffectOnly }.all { it.chain.dry == 0f })
+    }
 }

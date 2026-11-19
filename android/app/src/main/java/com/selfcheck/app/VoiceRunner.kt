@@ -32,6 +32,8 @@ class VoiceRunner(private val ctx: Context, private val onStopped: (String?) -> 
     @Volatile var outLevel = 0f
     @Volatile var latencyMs = 0
     @Volatile var recording = false
+    /** 변조된 소리를 이어폰·스피커로 내보낼지 (끄면 안 들리지만 녹음은 계속됨) */
+    @Volatile var monitor = true
     @Volatile var rate = 48000; private set
     private var thread: Thread? = null
     private val recChunks = ArrayList<ShortArray>()
@@ -96,7 +98,7 @@ class VoiceRunner(private val ctx: Context, private val onStopped: (String?) -> 
         thread = Thread({
             Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
             var err: String? = null
-            val inS = ShortArray(block); val outS = ShortArray(block)
+            val inS = ShortArray(block); val outS = ShortArray(block); val quiet = ShortArray(block)
             val inF = FloatArray(block); val outF = FloatArray(block)
             try {
                 r.startRecording(); track.play()
@@ -110,7 +112,7 @@ class VoiceRunner(private val ctx: Context, private val onStopped: (String?) -> 
                     eng.process(inF, n, outF)
                     var so = 0.0
                     for (i in 0 until n) { val v = outF[i].coerceIn(-1f, 1f); so += v * v; outS[i] = (v * 32767f).toInt().toShort() }
-                    track.write(outS, 0, n)
+                    track.write(if (monitor) outS else quiet, 0, n)
                     inLevel = sqrt(si / n).toFloat(); outLevel = sqrt(so / n).toFloat()
                     if (recording) synchronized(recChunks) {
                         if (recSamples < rate.toLong() * maxRecSeconds) { recChunks += outS.copyOf(n); recSamples += n } else recording = false
@@ -167,12 +169,45 @@ class VoiceRunner(private val ctx: Context, private val onStopped: (String?) -> 
     }
 }
 
-/** 화면에서 고른 값 (엔진이 아직 없어도 보관) */
+/** 화면에서 고른 값 (엔진이 아직 없어도 보관하고, 앱을 다시 켜도 기억) */
 class VoiceSettings {
     @Volatile var presetId = "fem_natural"
     @Volatile var semitones = 0f
     @Volatile var formant = 1f
     @Volatile var fxAmount = 1f
     @Volatile var micGain = 1f
-    fun apply(c: VoiceControls) { c.semitoneOffset = semitones; c.formantScale = formant; c.fxAmount = fxAmount; c.inputGain = micGain }
+    /** 변조된 소리에 내 원본 목소리를 섞을지, 섞는다면 얼마나 */
+    @Volatile var originalOn = false
+    @Volatile var originalLevel = 0.5f
+    /** 변조된 소리를 이어폰·스피커로 들을지 */
+    @Volatile var monitorOn = true
+    var category = ""
+    var recent: List<String> = emptyList()
+
+    fun apply(c: VoiceControls) {
+        c.semitoneOffset = semitones; c.formantScale = formant; c.fxAmount = fxAmount; c.inputGain = micGain
+        c.originalLevel = if (originalOn) originalLevel else 0f
+    }
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("voice_ui", Context.MODE_PRIVATE)
+
+    fun load(ctx: Context) {
+        val p = prefs(ctx)
+        presetId = p.getString("preset", presetId)?.takeIf { VoicePresets.byId(it) != null } ?: presetId
+        semitones = p.getFloat("semi", 0f).coerceIn(-6f, 6f); formant = p.getFloat("formant", 1f).coerceIn(0.7f, 1.3f)
+        fxAmount = p.getFloat("fx", 1f).coerceIn(0f, 1.5f); micGain = p.getFloat("mic", 1f).coerceIn(0.5f, 3.5f)
+        originalOn = p.getBoolean("origOn", false); originalLevel = p.getFloat("origLevel", 0.5f).coerceIn(0f, 1f)
+        monitorOn = p.getBoolean("monitor", true)
+        category = p.getString("category", "") ?: ""
+        recent = (p.getString("recent", "") ?: "").split(',').filter { it.isNotBlank() && VoicePresets.byId(it) != null }
+    }
+
+    fun save(ctx: Context) {
+        prefs(ctx).edit().putString("preset", presetId).putFloat("semi", semitones).putFloat("formant", formant).putFloat("fx", fxAmount)
+            .putFloat("mic", micGain).putBoolean("origOn", originalOn).putFloat("origLevel", originalLevel).putBoolean("monitor", monitorOn)
+            .putString("category", category).putString("recent", recent.joinToString(",")).apply()
+    }
+
+    /** 방금 쓴 프리셋을 최근 목록 맨 앞에 (최대 6개) */
+    fun touchRecent(id: String) { recent = (listOf(id) + recent.filter { it != id }).take(6) }
 }

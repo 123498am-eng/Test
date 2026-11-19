@@ -116,8 +116,8 @@ object VoicePresets {
         VoicePreset("monster", "괴물", "캐릭터", "아주 낮고 울리는 괴물 목소리",
             VoiceChain(listOf(VoiceCfg(semitones = -10f, formantLink = 0.8f)),
                 fx = { fs -> listOf(Distort(2.5f, 0.35f), Reverb(fs, 0.6f, 0.4f, 0.15f)) })),
-        VoicePreset("demon", "악마", "캐릭터", "낮은 목소리 두 겹과 깊은 울림",
-            VoiceChain(listOf(VoiceCfg(semitones = -5f, formantLink = 0.7f, gain = 0.8f), VoiceCfg(semitones = -12f, formantLink = 0.8f, gain = 0.6f, delayMs = 6f)), dry = 0.25f,
+        VoicePreset("demon", "악마", "캐릭터", "낮은 목소리 두 겹과 깊은 울림 (원본 섞기를 켜면 더 으스스)",
+            VoiceChain(listOf(VoiceCfg(semitones = -5f, formantLink = 0.7f, gain = 0.8f), VoiceCfg(semitones = -12f, formantLink = 0.8f, gain = 0.6f, delayMs = 6f)),
                 fx = { fs -> listOf(Distort(2.5f, 0.3f), Reverb(fs, 0.7f, 0.4f, 0.25f)) })),
         VoicePreset("alien", "외계인", "캐릭터", "떨리는 높낮이와 휘감기는 소리",
             VoiceChain(listOf(VoiceCfg(semitones = 3f, formantLink = 0.6f, vibratoHz = 11f, vibratoCents = 70f)),
@@ -184,6 +184,18 @@ object VoicePresets {
             VoiceChain(emptyList(), dry = 1f, fx = { fs ->
                 listOf(hp(fs, 80.0), Biquad.lowShelf(fs, 150.0, 4.0), Biquad.peak(fs, 3000.0, 1.0, 3.0), Compressor(fs, -24f, 3f, 6f)) })),
     )
+
+    /** 긴 이름을 "제목 / 보조 설명" 두 줄로: "아침 뉴스 · 밝고 경쾌 (여)" → ("아침 뉴스", "밝고 경쾌 · 여성"), "여성 (자연스럽게)" → ("여성", "자연스럽게") */
+    fun labels(name: String, withGender: Boolean = true): Pair<String, String?> {
+        var n = name; var gender: String? = null
+        if (n.endsWith(" (여)")) { n = n.removeSuffix(" (여)"); gender = if (withGender) "여성" else null }
+        else if (n.endsWith(" (남)")) { n = n.removeSuffix(" (남)"); gender = if (withGender) "남성" else null }
+        val dot = n.indexOf(" · ")
+        if (dot > 0) return n.substring(0, dot) to listOfNotNull(n.substring(dot + 3), gender).joinToString(" · ")
+        val m = Regex("^(.+?) \\((.+)\\)$").find(n)
+        if (m != null) return m.groupValues[1] to listOfNotNull(m.groupValues[2], gender).joinToString(" · ")
+        return n to gender
+    }
 
     val GROUPS = listOf("여성", "소녀", "뉴스 여성", "남성", "뉴스 남성", "캐릭터", "노래", "효과")
     fun byId(id: String) = ALL.firstOrNull { it.id == id }

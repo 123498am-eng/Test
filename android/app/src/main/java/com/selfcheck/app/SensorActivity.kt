@@ -70,7 +70,7 @@ class SensorActivity : ColumnActivity(), SensorEventListener {
         setupColumn(t.second, t.third)
         sm = getSystemService(SensorManager::class.java)
         tone = runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, 70) }.getOrNull()
-        big = TextView(this).apply { textSize = 44f; setTextColor(Color.BLACK); setPadding(0, dp(12), 0, 0) }
+        big = TextView(this).apply { textSize = 44f; setTextColor(Pal.text); setPadding(dp(4), dp(8), 0, 0); typeface = android.graphics.Typeface.DEFAULT_BOLD }
         col.addView(big)
         info = hint("")
         col.addView(info)
@@ -95,7 +95,7 @@ class SensorActivity : ColumnActivity(), SensorEventListener {
             }
             else -> false
         }
-        if (!ok) big.text = "이 휴대폰에는 필요한 센서가 없습니다"
+        if (!ok) { big.textSize = 20f; big.text = "이 휴대폰에는 필요한 센서가 없어요" }
     }
 
     override fun onPause() { super.onPause(); sm.unregisterListener(this); recording = false }
@@ -135,7 +135,7 @@ class SensorActivity : ColumnActivity(), SensorEventListener {
         big.text = if (flat) "%.1f° / %.1f°".format(a, b) else "%.1f°".format(a)
         val ok = abs(a) < 0.5f && abs(b) < 0.5f
         info.text = (if (flat) "바닥에 눕힌 상태: 좌우 / 앞뒤 기울기" else "세운 상태: 휴대폰 긴 변을 맞대고 기울기를 보세요") + if (ok) "\n✔ 수평입니다" else ""
-        big.setTextColor(if (ok) Color.rgb(20, 150, 60) else Color.BLACK)
+        big.setTextColor(if (ok) Pal.good else Pal.text)
         if (ok) beep(1200, ToneGenerator.TONE_PROP_ACK)
         gauge.a = a; gauge.b = b; gauge.flat = flat; gauge.invalidate()
     }
@@ -228,8 +228,8 @@ class SensorActivity : ColumnActivity(), SensorEventListener {
             val w = width.toFloat(); val h = height.toFloat(); val cx = w / 2; val cy = h / 2; val r = min(w, h) * 0.42f
             when (id) {
                 "level" -> {
-                    p.style = Paint.Style.FILL; p.color = Color.rgb(230, 245, 230); c.drawCircle(cx, cy, r, p)
-                    p.style = Paint.Style.STROKE; p.strokeWidth = 3f; p.color = Color.GRAY; c.drawCircle(cx, cy, r, p); c.drawCircle(cx, cy, r * 0.12f, p)
+                    p.style = Paint.Style.FILL; p.color = 0xFFE8F6EC.toInt(); c.drawCircle(cx, cy, r, p)
+                    p.style = Paint.Style.STROKE; p.strokeWidth = 4f; p.color = 0xFFB7C4DC.toInt(); c.drawCircle(cx, cy, r, p); c.drawCircle(cx, cy, r * 0.12f, p)
                     c.drawLine(cx - r, cy, cx + r, cy, p); c.drawLine(cx, cy - r, cx, cy + r, p)
                     val bx = cx - (a / 15f).coerceIn(-1f, 1f) * r * 0.85f
                     val by = if (flat) cy + (b / 15f).coerceIn(-1f, 1f) * r * 0.85f else cy

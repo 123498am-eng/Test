@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.Gravity
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.EditText
@@ -40,11 +41,23 @@ class ToolsActivity : ColumnActivity() {
         for ((id, title, desc) in UtilityActivity.TOOLS) if (id != "privacy") entries += Entry("보안·생활", title, desc) { Intent(this, UtilityActivity::class.java).putExtra("tool", id) }
         for ((id, title, desc) in SensorActivity.TOOLS) entries += Entry("센서", title, desc) { Intent(this, SensorActivity::class.java).putExtra("tool", id) }
 
-        setupColumn("도구 모음", "도구 ${entries.size}가지 · 사진·얼굴 분석은 모두 휴대폰 안에서 처리합니다")
+        setupColumn("도구 모음", "도구 ${entries.size}가지 · 사진·얼굴 분석은 모두 휴대폰 안에서 처리해요")
         val search = EditText(this).apply { hint = "도구 찾기 (예: 주름, 모자이크, QR)"; setSingleLine() }
-        full(search)
+        styleInput(search)
+        col.addView(search, UiKit.params(top = 4, ctx = this))
+        val groups = entries.map { it.group }.distinct()
+        chipBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(chipBox, UiKit.params(top = 10, ctx = this))
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(list)
+        fun chips() {
+            chipBox.removeAllViews()
+            val all = listOf("전체") + groups
+            chipBox.addView(UiKit.chipRow(this, all.map { g -> UiKit.chip(this, if (g == "전체") "전체 ${entries.size}" else "$g ${entries.count { it.group == g }}", (g == "전체" && picked == null) || g == picked) {
+                picked = if (g == "전체") null else g; chips(); show(search.text.toString().trim())
+            } }))
+        }
+        chips()
         search.addTextChangedListener(object : TextWatcher {
             override fun afterTextChanged(s: Editable?) { show(s?.toString()?.trim() ?: "") }
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -53,19 +66,21 @@ class ToolsActivity : ColumnActivity() {
         show("")
     }
 
+    private var picked: String? = null
+    private lateinit var chipBox: LinearLayout
+
+    private fun iconOf(group: String) = mapOf(
+        "정밀 얼굴 분석" to "🧖", "음성" to "🎙️", "얼굴 보정" to "💄", "인물·증명사진" to "🆔", "개인정보 보호" to "🛡️", "사진 편집" to "🖼️",
+        "필터·효과" to "🎨", "문서·글자·색" to "📄", "실시간 카메라" to "📷", "보안·생활" to "🔐", "센서" to "📡",
+    )[group] ?: "🧰"
+
     private fun show(q: String) {
         list.removeAllViews()
-        val shown = entries.filter { q.isEmpty() || it.title.contains(q, true) || it.desc.contains(q, true) || it.group.contains(q, true) }
-        if (shown.isEmpty()) { list.addView(hint("찾는 도구가 없습니다")); return }
+        val shown = entries.filter { (picked == null || it.group == picked) && (q.isEmpty() || it.title.contains(q, true) || it.desc.contains(q, true) || it.group.contains(q, true)) }
+        if (shown.isEmpty()) { list.addView(hint("찾는 도구가 없어요").apply { setPadding(dp(4), dp(16), 0, 0) }); return }
         for ((g, items) in shown.groupBy { it.group }) {
-            list.addView(section("$g (${items.size})"))
-            for (e in items) {
-                val c = card()
-                c.addView(TextView(this).apply { text = e.title; textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(Color.BLACK) })
-                c.addView(TextView(this).apply { text = e.desc; textSize = 13f; setTextColor(Color.DKGRAY) })
-                c.setOnClickListener { startActivity(e.open()) }
-                list.addView(c, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) })
-            }
+            list.addView(UiKit.sectionTitle(this, g, "${items.size}가지"))
+            for (e in items) list.addView(UiKit.listCard(this, iconOf(e.group), e.title, e.desc) { startActivity(e.open()) }, UiKit.params(bottom = 8, ctx = this))
         }
     }
 }

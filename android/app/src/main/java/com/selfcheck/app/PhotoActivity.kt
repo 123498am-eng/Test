@@ -25,31 +25,23 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** 등록한 사진 한 장의 정보(EXIF, 얼굴 분석)를 보여 줍니다. */
-class PhotoActivity : ComponentActivity() {
+class PhotoActivity : ColumnActivity() {
     private lateinit var root: LinearLayout
     private lateinit var image: ImageView
     private lateinit var faceBox: LinearLayout
     private lateinit var file: File
 
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         file = File(intent.getStringExtra("path") ?: run { finish(); return })
 
-        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(16), dp(16), dp(32)) }
-        val scroll = ScrollView(this).apply { addView(root); setBackgroundColor(Color.WHITE) }
-        scroll.setOnApplyWindowInsetsListener { v, insets ->
-            @Suppress("DEPRECATION")
-            v.setPadding(0, insets.systemWindowInsetTop, 0, insets.systemWindowInsetBottom); insets
-        }
-        setContentView(scroll)
-
-        root.addView(TextView(this).apply { text = "사진 정보"; textSize = 22f; setTypeface(null, Typeface.BOLD); setTextColor(Color.BLACK) })
+        setupColumn("사진 정보")
+        root = col
         image = ImageView(this).apply { adjustViewBounds = true }
         root.addView(image, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
 
         root.addView(Button(this).apply {
+            UiKit.styleButton(this, BtnStyle.PRIMARY, 14.5f)
             text = "정밀 얼굴 스캔 (주름·피부·비율·대칭)"
             setOnClickListener {
                 startActivity(Intent(this@PhotoActivity, FaceScanActivity::class.java).putExtra("path", file.absolutePath))
@@ -155,9 +147,11 @@ class PhotoActivity : ComponentActivity() {
         add("제조사", s(ExifInterface.TAG_MAKE))
         add("기종", s(ExifInterface.TAG_MODEL))
         add("렌즈", s(ExifInterface.TAG_LENS_MODEL))
-        add("초점 거리", d(ExifInterface.TAG_FOCAL_LENGTH)?.let { "%.1f mm".format(it) } +
-            (exif.getAttributeInt(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM, 0).takeIf { it > 0 }?.let { " (35mm 환산 $it mm)" } ?: ""))
-            .takeIf { d(ExifInterface.TAG_FOCAL_LENGTH) != null }
+        // (이전에는 값이 없을 때 "null" 이 그대로 보였음)
+        d(ExifInterface.TAG_FOCAL_LENGTH)?.let { fl ->
+            val eq = exif.getAttributeInt(ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM, 0).takeIf { it > 0 }?.let { " (35mm 환산 $it mm)" } ?: ""
+            add("초점 거리", "%.1f mm".format(fl) + eq)
+        }
         add("조리개", d(ExifInterface.TAG_F_NUMBER)?.let { "f/%.1f".format(it) })
         add("셔터 속도", d(ExifInterface.TAG_EXPOSURE_TIME)?.let {
             if (it < 1) "1/${(1 / it).roundToInt()}초" else "%.1f초".format(it)
@@ -199,18 +193,5 @@ class PhotoActivity : ComponentActivity() {
         b >= 1_000_000 -> "%.1f MB".format(b / 1_000_000.0)
         b >= 1_000 -> "%.0f KB".format(b / 1_000.0)
         else -> "$b B"
-    }
-
-    private fun section(t: String) = TextView(this).apply {
-        text = t; textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(Color.BLACK); setPadding(0, dp(18), 0, dp(4))
-    }
-    private fun hint(t: String) = TextView(this).apply { text = t; textSize = 13f; setTextColor(Color.DKGRAY) }
-    private fun rowView(label: String, value: String) = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        setPadding(0, dp(3), 0, dp(3))
-        addView(TextView(context).apply { text = label; textSize = 14f; setTextColor(Color.GRAY) },
-            LinearLayout.LayoutParams(dp(110), WRAP_CONTENT))
-        addView(TextView(context).apply { text = value; textSize = 14f; setTextColor(Color.BLACK) },
-            LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
     }
 }

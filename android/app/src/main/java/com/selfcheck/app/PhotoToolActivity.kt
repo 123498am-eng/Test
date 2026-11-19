@@ -75,15 +75,19 @@ class PhotoToolActivity : ColumnActivity() {
         }
         controls.addView(hold, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         if (tool.options.isNotEmpty()) {
-            val rg = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
-            tool.options.forEachIndexed { i, name -> rg.addView(RadioButton(this).apply { id = 1000 + i; text = name; isChecked = i == 0 }) }
-            rg.setOnCheckedChangeListener { _, id -> option = id - 1000; run() }
-            controls.addView(HorizontalScrollView(this).apply { addView(rg) })
+            val chips = ArrayList<TextView>()
+            tool.options.forEachIndexed { i, name ->
+                chips += UiKit.chip(this, name, i == option) {
+                    option = i; chips.forEachIndexed { k, c -> UiKit.setChip(c, k == i) }; run()
+                }
+            }
+            controls.addView(UiKit.chipRow(this, chips), UiKit.params(top = 10, ctx = this))
         }
         if (tool.param != null) {
             val label = hint("${tool.param}: $value")
             controls.addView(label)
             controls.addView(SeekBar(this).apply {
+                UiKit.styleSeek(this)
                 max = 100; progress = value
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(sb: SeekBar, p: Int, u: Boolean) { value = p; label.text = "${tool.param}: $p" }
@@ -94,8 +98,9 @@ class PhotoToolActivity : ColumnActivity() {
         }
         if (tool.textHint != null) {
             val et = EditText(this).apply { hint = tool.textHint; setSingleLine() }
+            styleInput(et)
             textBox = et
-            controls.addView(et)
+            controls.addView(et, UiKit.params(top = 10, ctx = this))
             controls.addView(button("글자 적용") { run() })
         } else textBox = null
     }
@@ -173,8 +178,8 @@ class PhotoToolActivity : ColumnActivity() {
         android.app.AlertDialog.Builder(this).setTitle("이어서 쓸 도구").setItems(names) { _, i ->
             tool = PhotoTools.ALL[i]
             src = b; out = null; faceDone = false; faceCache = null; facesCache = null; srcUri = null
-            (col.getChildAt(0) as TextView).text = tool.title
-            (col.getChildAt(1) as TextView).text = tool.desc
+            titleView.text = tool.title
+            subtitleView?.text = tool.desc
             buildControls(); info.text = ""; run()
         }.show()
     }

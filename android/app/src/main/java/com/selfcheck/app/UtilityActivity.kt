@@ -70,10 +70,10 @@ class UtilityActivity : ColumnActivity() {
         this.hint = hint
         if (multi) { minLines = 4; gravity = android.view.Gravity.TOP } else setSingleLine()
         if (password) inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-    }.also { full(it) }
+    }.also { styleInput(it); full(it) }
 
     private fun result(t: String, color: Int = Color.BLACK) = out.addView(TextView(this).apply { text = t; textSize = 15f; setTextColor(color); setTextIsSelectable(true); setPadding(0, dp(6), 0, dp(6)) })
-    private fun levelColor(l: Int) = when (l) { 0 -> Color.rgb(20, 130, 60); 1 -> Color.rgb(190, 120, 0); else -> Color.rgb(200, 30, 30) }
+    private fun levelColor(l: Int) = when (l) { 0 -> Pal.good; 1 -> Pal.warn; else -> Pal.bad }
 
     // ---------------- 비밀번호
     private fun pwBreach() {

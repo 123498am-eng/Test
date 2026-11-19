@@ -104,8 +104,8 @@ class BgRemoveActivity : ComponentActivity() {
         root.addView(progress, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { setMargins(dp(16), dp(4), dp(16), 0) })
 
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), dp(4), dp(8), dp(8)) }
-        fun btn(t: String, f: () -> Unit) = Button(this).apply { text = t; textSize = 12f; setOnClickListener { f() } }
-            .also { bar.addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)) }
+        fun btn(t: String, f: () -> Unit) = Button(this).apply { text = t; textSize = 12f; UiKit.styleButton(this, BtnStyle.ON_DARK, 12f, 8); setOnClickListener { f() } }
+            .also { bar.addView(it, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { setMargins(dp(3), 0, dp(3), 0) }) }
         btn("사진/동영상 고르기") { if (!busy) pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }
         bgBtn = btn("배경: 투명") { cycleBackdrop() }
         editBtn = btn("편집") { runEdit() }
@@ -113,7 +113,7 @@ class BgRemoveActivity : ComponentActivity() {
         // 붓 (사진 결과를 손으로 고치기)
         brushBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(8), 0, dp(8), 0); visibility = View.GONE; gravity = Gravity.CENTER_VERTICAL }
         brushBar.addView(Button(this).apply {
-            text = "붓: 복원"; textSize = 12f
+            text = "붓: 복원"; textSize = 12f; UiKit.styleButton(this, BtnStyle.ON_DARK, 12f, 8)
             setOnClickListener { editor?.let { e -> e.restore = !e.restore; text = if (e.restore) "붓: 복원" else "붓: 지우기" } }
         }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         brushBar.addView(TextView(this).apply { text = "굵기"; setTextColor(Color.WHITE); textSize = 12f; setPadding(dp(8), 0, dp(4), 0) })

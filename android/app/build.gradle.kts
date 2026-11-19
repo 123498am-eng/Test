@@ -30,6 +30,7 @@ android {
     kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
     packaging { jniLibs { useLegacyPackaging = false } }
     androidResources { noCompress += listOf("task", "tflite") }
+    testOptions { unitTests { isIncludeAndroidResources = true } }
     packaging { resources { excludes += listOf("META-INF/*.version", "META-INF/LICENSE*", "META-INF/NOTICE*", "META-INF/DEPENDENCIES", "META-INF/*.kotlin_module", "META-INF/versions/**") } }
 }
 
@@ -50,9 +51,22 @@ dependencies {
     // 컴퓨터(JVM)에서 이미지 분석 코드를 시험하기 위한 OpenCV (리눅스·윈도·맥 네이티브 포함)
     testImplementation("org.openpnp:opencv:4.9.0-0")
     testImplementation("org.json:json:20240303")
+    // 화면(UI)을 컴퓨터에서 이미지로 그려 눈으로 확인하는 시험용 (Robolectric 네이티브 그래픽)
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test:core:1.6.1")
 }
 
 // 단위 시험에서는 안드로이드용 OpenCV 대신 컴퓨터용 OpenCV 를 씁니다 (같은 org.opencv API)
 configurations.configureEach {
     if (name.endsWith("UnitTestRuntimeClasspath")) exclude(group = "org.opencv", module = "opencv")
+}
+
+// 스크린샷 시험은 -PuiShots=/저장/폴더 로 켭니다 (없으면 건너뜀). 안드로이드 SDK 파일을 미리 받아 둔 폴더는 -ProbolectricDir=... 로 지정 (없으면 Robolectric 이 알아서 내려받음)
+tasks.withType<Test>().configureEach {
+    (project.findProperty("uiShots") as String?)?.let { systemProperty("ui.shots.dir", it) }
+    (project.findProperty("uiTag") as String?)?.let { systemProperty("ui.shots.tag", it) }
+    (project.findProperty("robolectricDir") as String?)?.let {
+        systemProperty("robolectric.offline", "true"); systemProperty("robolectric.dependency.dir", it)
+    }
+    maxHeapSize = "3g"
 }
