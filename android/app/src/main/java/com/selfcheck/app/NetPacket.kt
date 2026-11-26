@@ -189,7 +189,7 @@ object PacketDecode {
             val f = arrayListOf("목적지 MAC" to dst + macKind(b[0].toInt()), "출발지 MAC" to srcM + macKind(b[6].toInt()))
             while ((etherType == 0x8100 || etherType == 0x88A8) && off + 4 <= b.size) { val tci = Bx.u16(b, off); f += "VLAN 태그" to "VLAN ID ${tci and 0xfff} · 우선순위 ${tci shr 13}${if (tci and 0x1000 != 0) " · DEI" else ""}"; etherType = Bx.u16(b, off + 2); off += 4 }
             f += "EtherType" to "0x%04x (%s)".format(etherType, PacketNames.ETHER[etherType] ?: "알 수 없음")
-            if (b[6].toInt() and 2 != 0) notes += "출발지 MAC 이 \"임의(무작위) MAC\"이에요: 폰·PC 의 프라이버시 기능이 만든 주소예요" to 0
+            if (b[6].toInt() and 2 != 0) notes += "출발지 MAC 의 '로컬 관리' 비트가 켜져 있어요: 제조사가 붙인 주소가 아니에요. 폰·PC 의 임의(무작위) MAC 기능일 수도, 가상 머신·컨테이너(52:54:00 은 QEMU/KVM, 02:42 는 Docker 기본값)일 수도, 관리자가 정한 주소일 수도 있어요" to 0
             layers += Layer("이더넷", f, notes)
         } else { etherType = if (Bx.u8(b, 0) shr 4 == 6) 0x86DD else 0x0800 }
         var summary = ""

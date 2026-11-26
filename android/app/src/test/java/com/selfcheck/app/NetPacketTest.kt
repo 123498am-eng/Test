@@ -152,7 +152,7 @@ class NetPacketTest {
         // IP 옵션, VLAN, MAC 종류
         assertTrue(PacketDecode.decode(raw("ip_option")).layer("IPv4").hasNote("IP 옵션이 있어요(4바이트)")); val vlan = PacketDecode.decode(raw("vlan_tcp")); assertTrue(vlan.layer("이더넷").f("EtherType").contains("IPv4")); assertEquals("10.100.0.5 → 10.100.0.1 TCP 1111 → 22 [SYN] 0바이트", vlan.summary)
         assertTrue(PacketDecode.decode(raw("arp_request")).layer("이더넷").f("목적지 MAC").endsWith("(브로드캐스트)")); assertTrue(PacketDecode.decode(raw("dhcp_discover")).layer("이더넷").f("목적지 MAC").endsWith("(브로드캐스트)"))
-        val priv = PacketDecode.decode(hexBytes("aabbccddee01" + "02aabbccddee" + "0806" + "0001080006040001" + "02aabbccddee" + "c0a8010a" + "000000000000" + "c0a80101")); assertTrue(priv.layer("이더넷").hasNote("임의(무작위) MAC"))
+        val priv = PacketDecode.decode(hexBytes("aabbccddee01" + "02aabbccddee" + "0806" + "0001080006040001" + "02aabbccddee" + "c0a8010a" + "000000000000" + "c0a80101")); assertTrue(priv.layer("이더넷").hasNote("로컬 관리"))
         // ARP
         assertEquals("ARP: 누가 192.168.1.1 인가? (192.168.1.10 가 물음)", PacketDecode.decode(raw("arp_request")).summary); assertEquals("ARP: 192.168.1.1 는 aa:bb:cc:dd:ee:01", PacketDecode.decode(raw("arp_reply")).summary)
         assertTrue(PacketDecode.decode(raw("arp_gratuitous")).layer("ARP").hasNote("gratuitous ARP")); assertTrue(PacketDecode.decode(raw("arp_request")).layer("ARP").f("동작").contains("누가 192.168.1.1 인가?"))

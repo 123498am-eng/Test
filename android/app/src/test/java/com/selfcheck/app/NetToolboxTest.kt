@@ -136,13 +136,37 @@ class NetToolboxTest {
         }
     }
 
+    /**
+     * 기본 예제 입력에 일부러 "문제"를 넣어 둔 도구 (빨간 안내가 나오는 게 정상):
+     * 점검 도구의 예제는 문제가 보이도록 만든 샘플이고(unsafe-inline CSP, 169.254 주소, 열린 Redis, 열린 방화벽·MySQL),
+     * sshd 강화는 "키 등록 확인 전에 비밀번호 로그인을 끄면 못 들어온다"는 경고를 항상 보여 줍니다.
+     */
+    private val DEFAULT_FINDINGS = setOf("sec_csp_check", "log_iface", "log_sockets", "log_firewall", "make_sshd_harden")
+
     @Test fun everyOfflineToolRunsWithItsDefaults() {
+        val problems = ArrayList<String>(); var count = 0; val reddened = HashSet<String>()
         for (t in NetToolbox.ALL.filter { it.mode == ToolMode.OFFLINE && it.fields.none { f -> f.kind == FieldKind.FILE } }) {
-            val values = t.fields.associate { it.key to it.default }
-            val r = t.run(ToolInput(values), NoHost, ToolEnv())
-            assertTrue("${t.id}: 결과가 비었음", r.outs.isNotEmpty())
-            assertFalse("${t.id}: 기본 입력인데 오류\n${r.text()}", r.hasError)
+            count++
+            val r = try { t.run(ToolInput(t.fields.associate { it.key to it.default }), FileHost, ToolEnv()) } catch (e: Throwable) { problems += "${t.id}: 예외 $e"; continue }
+            if (r.outs.isEmpty()) { problems += "${t.id}: 결과가 비었음"; continue }
+            val reds = r.outs.filterIsInstance<Out.Note>().filter { it.level == 2 }.map { it.text.take(90) }
+            if (reds.isNotEmpty()) reddened += t.id
+            if (reds.isNotEmpty() && t.id !in DEFAULT_FINDINGS) problems += "${t.id}: 기본 입력인데 빨간 안내 → $reds"
         }
+        for (id in DEFAULT_FINDINGS - reddened) problems += "$id: 허용 목록에 있는데 더 이상 빨간 안내가 없음 (목록에서 빼세요)"
+        assertTrue("오프라인 도구 $count 개 중 문제:\n" + problems.joinToString("\n"), problems.isEmpty())
+        assertTrue("검사한 오프라인 도구 수 $count (필터가 너무 많이 걸러냈는지 확인)", count >= 180)
+    }
+
+    @Test fun toolboxHasUniqueIdsAndEveryGroupIsKnown() {
+        val all = NetToolbox.ALL; val ids = all.map { it.id }
+        assertEquals("겹치는 도구 id: ${ids.groupBy { it }.filter { it.value.size > 1 }.keys}", ids.size, ids.toSet().size)
+        for (t in all) { assertTrue(t.id, t.title.isNotBlank() && t.desc.length >= 10); assertTrue("${t.id} 의 묶음 ${t.group}", t.group in NetGroups.ALL); assertTrue(t.id, Regex("^[a-z][a-z0-9_]*$").matches(t.id)) }
+        val perGroup = all.groupBy { it.group }.mapValues { it.value.size }
+        assertEquals(324, all.size); assertEquals(NetGroups.ALL.toSet(), perGroup.keys)
+        assertEquals(mapOf(NetGroups.GEO to 39, NetGroups.SERVER to 19, NetGroups.WEB to 18, NetGroups.MAIL to 16, NetGroups.SEC to 14, NetGroups.LOG to 12, NetGroups.PACKET to 10, NetGroups.MAKE to 14, NetGroups.PLAN to 10), perGroup.filterKeys { it in setOf(NetGroups.GEO, NetGroups.SERVER, NetGroups.WEB, NetGroups.MAIL, NetGroups.SEC, NetGroups.LOG, NetGroups.PACKET, NetGroups.MAKE, NetGroups.PLAN) })
+        assertEquals(152, all.count { it.group in setOf(NetGroups.GEO, NetGroups.SERVER, NetGroups.WEB, NetGroups.MAIL, NetGroups.SEC, NetGroups.LOG, NetGroups.PACKET, NetGroups.MAKE, NetGroups.PLAN) })
+        assertEquals(172, all.count { it.group in setOf(NetGroups.IP, NetGroups.CONVERT, NetGroups.HASH, NetGroups.DNS, NetGroups.DIAG, NetGroups.LAN, NetGroups.SPEED, NetGroups.WIFI, NetGroups.GEN, NetGroups.REF, NetGroups.CMD) })
     }
 
     // ---------------------------------------------------------------- IP·서브넷 (파이썬 정답과 비교)

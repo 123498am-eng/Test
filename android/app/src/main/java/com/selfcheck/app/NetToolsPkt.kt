@@ -13,7 +13,7 @@ object PktTools {
     private const val LOCAL = "붙여 넣은 바이트(또는 고른 파일)는 휴대폰 안에서만 해석하고 어디로도 보내지 않아요."
     private const val HEX_HINT = "16진수(공백·줄바꿈 자유). tcpdump -xx · hexdump -C · 와이어샤크 \"Copy as Hex Dump\" 글도 그대로 붙여 넣을 수 있어요"
     private const val BAD_HEX = "16진수로 읽지 못했어요. 0-9, a-f 글자만 쓰고 전체 글자 수가 짝수(바이트 단위)인지 확인하세요"
-    private const val FILE_LIMIT = 40_000_000
+    private const val FILE_LIMIT = 24_000_000
     private val START = listOf("자동 판별", "이더넷부터", "IP 부터")
     private val CK_MODES = listOf("패킷의 체크섬 검사하고 고치기", "바이트 열의 체크섬만 계산 (RFC 1071)")
 
@@ -38,12 +38,12 @@ object PktTools {
         val bytes = f.open()?.use { it.readUpTo(FILE_LIMIT) } ?: return null to "파일을 열지 못했어요"
         val cap = PcapRead.read(bytes)
         if (cap.packets.isEmpty()) return null to (cap.notes.firstOrNull() ?: "패킷이 하나도 없어요")
-        val notes = cap.notes + (if (f.size > FILE_LIMIT) listOf("파일이 40MB 를 넘어서 앞부분만 분석했어요") else emptyList())
+        val notes = cap.notes + (if (f.size > FILE_LIMIT) listOf("파일이 24MB 를 넘어서 앞부분만 분석했어요") else emptyList())
         return PcapRead.Capture(cap.packets, cap.format, cap.truncatedFile, notes) to null
     }
 
     private fun capTool(id: String, title: String, desc: String, run: (PcapRead.Capture, ToolHost) -> ToolResult) =
-        tool(id, G, title, desc, listOf(file("f", "캡처 파일 (.pcap / .pcapng)")), ToolMode.OFFLINE, "$LOCAL 파일이 40MB 를 넘으면 앞부분만 읽어요. 내 장비·내 망에서 직접 캡처했거나 분석 허락을 받은 파일만 쓰세요.", runLabel = "분석") { _, host, _ ->
+        tool(id, G, title, desc, listOf(file("f", "캡처 파일 (.pcap / .pcapng)")), ToolMode.OFFLINE, "$LOCAL 파일이 24MB 를 넘으면 앞부분만 읽어요. 내 장비·내 망에서 직접 캡처했거나 분석 허락을 받은 파일만 쓰세요.", runLabel = "분석") { _, host, _ ->
             val (cap, err) = loadCap(host); if (cap == null) need(err ?: "파일을 읽지 못했어요") else run(cap, host)
         }
 

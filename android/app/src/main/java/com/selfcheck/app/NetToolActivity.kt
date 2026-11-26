@@ -267,13 +267,17 @@ class NetToolActivity : ColumnActivity(), ToolHost {
 
     private val WS = Regex("\\s+")
 
+    /** 칸이 5개 이상인 표는 글자와 칸 안쪽 여백을 조금 줄여서, IP 같은 낱말이 줄바꿈으로 쪼개지지 않게 함 */
+    private fun tableTextSize(cols: Int): Float = if (cols >= 5) 11f else 12.5f
+    private fun tableRightPad(cols: Int): Int = dp(if (cols >= 5) 4 else 6)
+
     private fun tableSpec(rows: List<Out.Cols>): TableSpec {
         val n = rows.maxOf { it.cells.size }
         val dm = resources.displayMetrics
         // 화면 좌우 여백(16dp×2) + 카드 여백(14dp×2) + 줄 안쪽 여백(8dp×2)
         val avail = ((if (col.width > 0) col.width else dm.widthPixels) - dp(32) - dp(28) - dp(16)).coerceAtLeast(dp(200))
-        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12.5f, dm); typeface = Typeface.DEFAULT_BOLD }
-        val pad = dp(8)                                           // 칸 안쪽 여백(왼쪽 2dp + 오른쪽 6dp)
+        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, tableTextSize(n), dm); typeface = Typeface.DEFAULT_BOLD }
+        val pad = dp(2) + tableRightPad(n)                        // 칸 안쪽 여백(왼쪽 2dp + 오른쪽 6dp, 5칸 이상이면 4dp)
         val tokens = Array(n) { ArrayList<Int>() }                // 칸마다, 줄마다 "가장 긴 낱말"의 너비
         val full = IntArray(n)
         for (row in rows) row.cells.forEachIndexed { i, c ->
@@ -287,7 +291,17 @@ class NetToolActivity : ColumnActivity(), ToolHost {
             val idx = if (sorted.size <= 6) sorted.size - 1 else ((sorted.size - 1) * 0.85).toInt()
             minOf(sorted.getOrElse(idx) { 0 } + pad, avail / 2)
         }
-        // 합쳐서 화면보다 넓으면 가장 넓은 칸부터 줄임 (짧은 낱말 칸은 그대로 둠)
+        // 합쳐서 화면보다 넓으면 먼저, 한 줄에만 있는 아주 긴 낱말(긴 주소 등)이 차지한 폭을 "두 번째로 긴 낱말" 폭까지 줄임
+        // (IP·시각처럼 모든 줄의 낱말 길이가 비슷한 칸은 줄이지 않아 중간에서 끊기지 않게)
+        val soft = IntArray(n) { i -> val t = tokens[i].sorted(); (if (t.size >= 2) t[t.size - 2] else t.lastOrNull() ?: 0) + pad }
+        var spare = mins.sum() - avail
+        while (spare > 0) {
+            val i = mins.indices.maxByOrNull { mins[it] - soft[it] } ?: break
+            val can = mins[i] - soft[i]
+            if (can <= 0) break
+            val d = minOf(can, spare); mins[i] -= d; spare -= d
+        }
+        // 그래도 화면보다 넓으면 가장 넓은 칸부터 줄임 (짧은 낱말 칸은 그대로 둠)
         var over = mins.sum() - avail
         val floor = dp(44)
         while (over > 0) {
@@ -314,7 +328,7 @@ class NetToolActivity : ColumnActivity(), ToolHost {
         o.cells.forEachIndexed { i, c ->
             val params = if (spec != null && i < spec.minPx.size) LinearLayout.LayoutParams(spec.minPx[i], WRAP_CONTENT, spec.weights[i]) else LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
             row.addView(
-                UiKit.text(this, UiKit.keepWords(c), 12.5f, if (o.header) Pal.text2 else levelColor(o.level), o.header || (i == 0 && n >= 3)).apply { setPadding(dp(2), 0, dp(6), 0) },
+                UiKit.text(this, UiKit.keepWords(c), tableTextSize(spec?.minPx?.size ?: n), if (o.header) Pal.text2 else levelColor(o.level), o.header || (i == 0 && n >= 3)).apply { setPadding(dp(2), 0, tableRightPad(spec?.minPx?.size ?: n), 0) },
                 params,
             )
         }

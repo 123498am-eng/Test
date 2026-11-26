@@ -214,6 +214,17 @@ class UiShotTest {
         })
     }
 
+    // ---- 새로 늘린 묶음(IP 위치·보안·로그·패킷·만들기·계산): 오프라인 도구를 기본 입력으로 진짜 실행한 결과를 그림
+    private fun real(id: String, vararg kv: Pair<String, String>): ToolResult = runNetTool(id, *kv)
+    @Test fun ntGeoCountry() = screen<NetToolActivity>("${tag}_nt_geo_country", 1500, mapOf("tool" to "geo_country")) { a -> a.render(real("geo_country", "ip" to "8.8.8.8")) }
+    @Test fun ntSecCvss() = screen<NetToolActivity>("${tag}_nt_sec_cvss", 1700, mapOf("tool" to "sec_cvss"))
+    @Test fun ntLogAccess() = screen<NetToolActivity>("${tag}_nt_log_access", 2600, mapOf("tool" to "log_access")) { a -> a.render(real("log_access")) }
+    @Test fun ntPktDecode() = screen<NetToolActivity>("${tag}_nt_pkt_decode", 2600, mapOf("tool" to "pkt_decode")) { a -> a.render(real("pkt_decode")) }
+    @Test fun ntMakeCron() = screen<NetToolActivity>("${tag}_nt_make_cron", 2100, mapOf("tool" to "make_cron")) { a -> a.render(real("make_cron", "from" to "2024-03-01 09:30")) }
+    @Test fun ntMakeNft() = screen<NetToolActivity>("${tag}_nt_make_nft", 2300, mapOf("tool" to "make_nftables")) { a -> a.render(real("make_nftables")) }
+    @Test fun ntPlanPoe() = screen<NetToolActivity>("${tag}_nt_plan_poe", 2100, mapOf("tool" to "calc_poe"))
+    @Test fun ntPlanRaid() = screen<NetToolActivity>("${tag}_nt_plan_raid", 1900, mapOf("tool" to "calc_raid"))
+
     @Test fun ntUpnpResult() = screen<NetToolActivity>("${tag}_nt_upnp_result", 1500, mapOf("tool" to "upnp_find")) { a ->
         a.render(result {
             kv("찾은 기기", "4대 (서비스 11개)")
