@@ -1,0 +1,32 @@
+[
+ {
+  "ssid": "IEEE",
+  "pass": "password",
+  "psk": "f42c6fc52df0ebef9ebb4b90b38a5f902e83fe1b135a70e23aed762e9710a12e"
+ },
+ {
+  "ssid": "ThisIsASSID",
+  "pass": "ThisIsAPassword",
+  "psk": "0dc0d6eb90555ed6419756b9a15ec3e3209b63df707dd508d14581f8982721af"
+ },
+ {
+  "ssid": "net0-c나",
+  "pass": "SqKZe{f3VG#5!K5BQWj<1/G[c#5*Hc]3J1~rg>;9Q7d1qhFdx;qR",
+  "psk": "4cae7ac5144ffd482adcc304d78f772ac391ee81bc80f6d2b64b9273e44de18f"
+ },
+ {
+  "ssid": "net1-나byza",
+  "pass": "m]t!j06?aaX&/IVA_3f94S {+8*JBkt=ntR",
+  "psk": "b5b46654ffd70e55bddd0eadf9bcf45df068def6bc3e11e031736e5e8a134b29"
+ },
+ {
+  "ssid": "net2-b",
+  "pass": "%)I%%shHHy(s~:M[m#:J3xFOwk 55ZfO",
+  "psk": "64e5b398fa09520a58d5cd1fa0060aacb3a5e0bbbd0cf8f5802ce532b3123292"
+ },
+ {
+  "ssid": "net3-다나ayc",
+  "pass": "ud5A*K.QV0wZQ8C3.zbC",
+  "psk": "ce9dd06d8f5b36955df6b2056b6495cb10e82bd4adfe9729f0e9247e967ddac2"
+ }
+]
