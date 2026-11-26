@@ -1,0 +1,557 @@
+[
+ {
+  "inputs": {
+   "host": "192.168.1.10"
+  },
+  "expr": "host 192.168.1.10",
+  "display": "ip.addr == 192.168.1.10",
+  "matches": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30,
+   31,
+   32,
+   33,
+   34,
+   35,
+   36,
+   37,
+   38,
+   39,
+   42,
+   43,
+   44,
+   45,
+   46,
+   47,
+   48,
+   49,
+   51
+  ]
+ },
+ {
+  "inputs": {
+   "host": "192.168.1.10",
+   "d": "보내는 쪽(출발지)만"
+  },
+  "expr": "src host 192.168.1.10",
+  "display": "ip.src == 192.168.1.10",
+  "matches": [
+   0,
+   2,
+   3,
+   5,
+   7,
+   8,
+   10,
+   12,
+   13,
+   15,
+   17,
+   18,
+   19,
+   20,
+   21,
+   23,
+   25,
+   26,
+   27,
+   29,
+   30,
+   31,
+   32,
+   33,
+   35,
+   37,
+   38,
+   42,
+   43,
+   45,
+   47,
+   48,
+   49,
+   51
+  ]
+ },
+ {
+  "inputs": {
+   "host": "8.8.8.8",
+   "d": "받는 쪽(목적지)만"
+  },
+  "expr": "dst host 8.8.8.8",
+  "display": "ip.dst == 8.8.8.8",
+  "matches": [
+   3,
+   5,
+   7,
+   8,
+   35,
+   37
+  ]
+ },
+ {
+  "inputs": {
+   "net": "192.168.1.0/24"
+  },
+  "expr": "net 192.168.1.0/24",
+  "display": "ip.addr == 192.168.1.0/24",
+  "matches": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30,
+   31,
+   32,
+   33,
+   34,
+   35,
+   36,
+   37,
+   38,
+   39,
+   42,
+   43,
+   44,
+   45,
+   46,
+   47,
+   48,
+   49,
+   51
+  ]
+ },
+ {
+  "inputs": {
+   "net": "192.168.1.77/24"
+  },
+  "expr": "net 192.168.1.0/24",
+  "display": "ip.addr == 192.168.1.0/24",
+  "matches": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30,
+   31,
+   32,
+   33,
+   34,
+   35,
+   36,
+   37,
+   38,
+   39,
+   42,
+   43,
+   44,
+   45,
+   46,
+   47,
+   48,
+   49,
+   51
+  ]
+ },
+ {
+  "inputs": {
+   "net": "93.184.0.0/16",
+   "d": "받는 쪽(목적지)만"
+  },
+  "expr": "dst net 93.184.0.0/16",
+  "display": "ip.dst == 93.184.0.0/16",
+  "matches": [
+   10,
+   12,
+   13,
+   15,
+   17,
+   18,
+   19
+  ]
+ },
+ {
+  "inputs": {
+   "p": "TCP",
+   "ports": "443"
+  },
+  "expr": "tcp and port 443",
+  "display": "tcp && tcp.port == 443",
+  "matches": [
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19
+  ]
+ },
+ {
+  "inputs": {
+   "ports": "80,443,8000-8100"
+  },
+  "expr": "(port 80 or port 443 or portrange 8000-8100)",
+  "display": "(tcp.port in {80 443 8000..8100} || udp.port in {80 443 8000..8100})",
+  "matches": [
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   23,
+   24,
+   25,
+   26,
+   32,
+   33,
+   34,
+   42,
+   48,
+   51
+  ]
+ },
+ {
+  "inputs": {
+   "p": "UDP",
+   "ports": "53",
+   "d": "받는 쪽(목적지)만"
+  },
+  "expr": "udp and dst port 53",
+  "display": "udp && udp.dstport == 53",
+  "matches": [
+   3,
+   5,
+   7,
+   8,
+   37
+  ]
+ },
+ {
+  "inputs": {
+   "p": "TCP",
+   "ports": "22 23",
+   "d": "받는 쪽(목적지)만"
+  },
+  "expr": "tcp and (dst port 22 or dst port 23)",
+  "display": "tcp && tcp.dstport in {22 23}",
+  "matches": [
+   21,
+   43,
+   45,
+   47
+  ]
+ },
+ {
+  "inputs": {
+   "f": "SYN 만 (연결 시작 요청)"
+  },
+  "expr": "tcp and tcp[tcpflags] & (tcp-syn|tcp-ack) = tcp-syn",
+  "display": "tcp && tcp.flags.syn == 1 && tcp.flags.ack == 0",
+  "matches": [
+   10,
+   15,
+   20,
+   21,
+   23,
+   27,
+   42,
+   43,
+   51
+  ]
+ },
+ {
+  "inputs": {
+   "f": "SYN+ACK (연결 수락)"
+  },
+  "expr": "tcp and tcp[tcpflags] & (tcp-syn|tcp-ack) = (tcp-syn|tcp-ack)",
+  "display": "tcp && tcp.flags.syn == 1 && tcp.flags.ack == 1",
+  "matches": [
+   11,
+   16,
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "inputs": {
+   "f": "RST (연결 거부·강제 종료)"
+  },
+  "expr": "tcp and tcp[tcpflags] & tcp-rst != 0",
+  "display": "tcp && tcp.flags.reset == 1",
+  "matches": [
+   22
+  ]
+ },
+ {
+  "inputs": {
+   "f": "FIN (연결 종료)"
+  },
+  "expr": "tcp and tcp[tcpflags] & tcp-fin != 0",
+  "display": "tcp && tcp.flags.fin == 1",
+  "matches": []
+ },
+ {
+  "inputs": {
+   "f": "PSH (데이터 즉시 전달)"
+  },
+  "expr": "tcp and tcp[tcpflags] & tcp-push != 0",
+  "display": "tcp && tcp.flags.push == 1",
+  "matches": [
+   13,
+   19,
+   26,
+   30,
+   31,
+   32,
+   33,
+   46,
+   47
+  ]
+ },
+ {
+  "inputs": {
+   "p": "TCP",
+   "f": "SYN 만 (연결 시작 요청)",
+   "ports": "8080"
+  },
+  "expr": "tcp and port 8080 and tcp[tcpflags] & (tcp-syn|tcp-ack) = tcp-syn",
+  "display": "tcp && tcp.port == 8080 && tcp.flags.syn == 1 && tcp.flags.ack == 0",
+  "matches": [
+   20,
+   42,
+   51
+  ]
+ },
+ {
+  "inputs": {
+   "p": "ICMP"
+  },
+  "expr": "icmp",
+  "display": "icmp",
+  "matches": [
+   35,
+   36,
+   39
+  ]
+ },
+ {
+  "inputs": {
+   "p": "ICMPv6"
+  },
+  "expr": "icmp6",
+  "display": "icmpv6",
+  "matches": [
+   40,
+   41
+  ]
+ },
+ {
+  "inputs": {
+   "p": "ARP"
+  },
+  "expr": "arp",
+  "display": "arp",
+  "matches": [
+   0,
+   1,
+   2
+  ]
+ },
+ {
+  "inputs": {
+   "p": "IPv6"
+  },
+  "expr": "ip6",
+  "display": "ipv6",
+  "matches": [
+   40,
+   41
+  ]
+ },
+ {
+  "inputs": {
+   "p": "TCP",
+   "host": "93.184.216.34",
+   "ports": "443",
+   "x": "192.168.1.1"
+  },
+  "expr": "tcp and host 93.184.216.34 and port 443 and not host 192.168.1.1",
+  "display": "tcp && ip.addr == 93.184.216.34 && tcp.port == 443 && !(ip.addr == 192.168.1.1)",
+  "matches": [
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19
+  ]
+ },
+ {
+  "inputs": {
+   "host": "2001:db8::1"
+  },
+  "expr": "host 2001:db8::1",
+  "display": "ipv6.addr == 2001:db8::1",
+  "matches": [
+   40,
+   41
+  ]
+ },
+ {
+  "inputs": {
+   "net": "2001:db8::/32"
+  },
+  "expr": "net 2001:db8::/32",
+  "display": "ipv6.addr == 2001:db8::/32",
+  "matches": [
+   40,
+   41
+  ]
+ },
+ {
+  "inputs": {
+   "x": "8.8.8.8"
+  },
+  "expr": "not host 8.8.8.8",
+  "display": "!(ip.addr == 8.8.8.8)",
+  "matches": [
+   0,
+   1,
+   2,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28,
+   29,
+   30,
+   31,
+   32,
+   33,
+   34,
+   38,
+   39,
+   40,
+   41,
+   42,
+   43,
+   44,
+   45,
+   46,
+   47,
+   48,
+   49,
+   50,
+   51
+  ]
+ }
+]

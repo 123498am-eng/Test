@@ -1,0 +1,64 @@
+{
+ "total": 52,
+ "bytes": 5321,
+ "first": 1700000000000000,
+ "last": 1700000003300000,
+ "l3": {
+  "ARP": 3,
+  "IPv4": 46,
+  "IPv6": 2
+ },
+ "dns_q": {
+  "example.com A": 2,
+  "missing.example.org A": 1,
+  "timeout.example.net A": 2
+ },
+ "dns_unanswered": [
+  "timeout.example.net A"
+ ],
+ "dns_fail": [
+  [
+   "missing.example.org A",
+   "NXDOMAIN"
+  ]
+ ],
+ "sni": {
+  "example.com": 1,
+  "api.example.org": 1
+ },
+ "http": {
+  "nas.local GET /admin": 1
+ },
+ "syn": 9,
+ "synack": 5,
+ "rst": 1,
+ "retrans": 1,
+ "zero": 1,
+ "syn_unanswered": [
+  [
+   "203.0.113.99:8080",
+   3
+  ]
+ ],
+ "rst_from": [
+  "192.168.1.20:22"
+ ],
+ "icmp_unreach": [
+  "192.168.1.1 → 192.168.1.10: 목적지 도달 불가 · 포트 도달 불가(그 포트를 듣는 프로그램이 없음)"
+ ],
+ "arp_unanswered": [
+  "192.168.1.99"
+ ],
+ "cleartext": {
+  "HTTP Basic 인증": 1,
+  "FTP 로그인(USER/PASS)": 2,
+  "Telnet(암호화 없는 원격 접속)": 1
+ },
+ "notip": 1,
+ "ja3": {
+  "5a1edc7f170af1014fc65c994878e63c": 1,
+  "37f7d09ced1a845dc48872abc1a29d7b": 1
+ },
+ "ip_fragments": 1,
+ "n_written": 52
+}

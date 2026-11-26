@@ -1,0 +1,26 @@
+{
+ "sample.pcap": {
+  "count": 52,
+  "first": 1700000000000000,
+  "last": 1700000003300000,
+  "bytes": 5321
+ },
+ "sample_nano.pcap": {
+  "count": 52,
+  "first": 1700000000000000,
+  "last": 1700000003300000,
+  "bytes": 5321
+ },
+ "sample_be.pcap": {
+  "count": 52,
+  "first": 1700000000000000,
+  "last": 1700000003300000,
+  "bytes": 5321
+ },
+ "sample.pcapng": {
+  "count": 52,
+  "first": 1700000000000000,
+  "last": 1700000003300000,
+  "bytes": 5321
+ }
+}
