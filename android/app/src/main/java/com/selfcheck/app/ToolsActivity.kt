@@ -95,7 +95,7 @@ class ToolsActivity : ColumnActivity() {
         "필터·효과" to "🎨", "문서·글자·색" to "📄", "실시간 카메라" to "📷", "보안·생활" to "🔐", "네트워크" to "🌐", "센서" to "📡",
         NetGroups.IP to "🧮", NetGroups.CONVERT to "🔁", NetGroups.HASH to "🔑", NetGroups.DNS to "🧭", NetGroups.DIAG to "🩺", NetGroups.LAN to "🏠",
         NetGroups.SPEED to "🚀", NetGroups.WIFI to "📶", NetGroups.GEN to "🛠️", NetGroups.REF to "📚", NetGroups.CMD to "💻",
-        NetGroups.GEO to "📍", NetGroups.SERVER to "🖥️", NetGroups.WEB to "🕸️", NetGroups.MAIL to "✉️", NetGroups.SEC to "🔒", NetGroups.LOG to "📜", NetGroups.PACKET to "📦", NetGroups.MAKE to "🔧",
+        NetGroups.GEO to "📍", NetGroups.SERVER to "🖥️", NetGroups.WEB to "🕸️", NetGroups.MAIL to "✉️", NetGroups.SEC to "🔒", NetGroups.LOG to "📜", NetGroups.PACKET to "📦", NetGroups.MAKE to "🔧", NetGroups.PLAN to "📐",
     )[group] ?: "🧰"
 
     private fun show(q: String) {

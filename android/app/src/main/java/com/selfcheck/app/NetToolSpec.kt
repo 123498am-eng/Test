@@ -181,5 +181,6 @@ object NetGroups {
     const val LOG = "로그·출력 분석"
     const val PACKET = "패킷 해석"
     const val MAKE = "키·주소·설정 만들기"
-    val ALL = listOf(IP, CONVERT, HASH, DNS, DIAG, LAN, SPEED, WIFI, GEN, REF, CMD, GEO, SERVER, WEB, MAIL, SEC, LOG, PACKET, MAKE)
+    const val PLAN = "용량·전력·품질 계산"
+    val ALL = listOf(IP, CONVERT, HASH, DNS, DIAG, LAN, SPEED, WIFI, GEN, REF, CMD, GEO, SERVER, WEB, MAIL, SEC, LOG, PACKET, MAKE, PLAN)
 }
