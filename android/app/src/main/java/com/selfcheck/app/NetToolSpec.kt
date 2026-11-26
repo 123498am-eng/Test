@@ -93,6 +93,8 @@ interface ToolHost {
     fun lanSockets(): () -> Socket = { Socket() }
     /** UDP(DatagramSocket)를 Wi-Fi 망에 묶기 */
     fun bindDatagram(s: java.net.DatagramSocket) {}
+    /** 오프라인 IP 자료(국가·통신사). 읽을 수 없으면 null */
+    fun geoDb(): IpGeoDb? = null
 }
 
 object NoHost : ToolHost
@@ -171,5 +173,13 @@ object NetGroups {
     const val GEN = "설정 만들기"
     const val REF = "프로토콜 사전"
     const val CMD = "점검 순서·명령어"
-    val ALL = listOf(IP, CONVERT, HASH, DNS, DIAG, LAN, SPEED, WIFI, GEN, REF, CMD)
+    const val GEO = "IP 위치·IP 찾기"
+    const val SERVER = "서버·서비스 점검"
+    const val WEB = "웹사이트 점검"
+    const val MAIL = "메일·DNS 점검"
+    const val SEC = "보안 점검"
+    const val LOG = "로그·출력 분석"
+    const val PACKET = "패킷 해석"
+    const val MAKE = "키·주소·설정 만들기"
+    val ALL = listOf(IP, CONVERT, HASH, DNS, DIAG, LAN, SPEED, WIFI, GEN, REF, CMD, GEO, SERVER, WEB, MAIL, SEC, LOG, PACKET, MAKE)
 }

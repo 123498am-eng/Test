@@ -108,6 +108,18 @@ object TlsInspect {
         } catch (e: Exception) { runCatching { raw.close() }; throw e }
     }
 
+    /** 이미 연결된 소켓을 TLS 로 바꿈 (STARTTLS 용). 인증서는 검사만 하고 막지 않아서 결과에 신뢰 여부를 따로 알려 줌 */
+    fun wrap(raw: Socket, host: String, port: Int): Pair<SSLSocket, TlsReport> {
+        val t0 = System.nanoTime()
+        val rec = Recording()
+        val ctx = SSLContext.getInstance("TLS").apply { init(null, arrayOf<TrustManager>(rec), null) }
+        val ssl = ctx.socketFactory.createSocket(raw, host, port, true) as SSLSocket
+        ssl.startHandshake()
+        val s = ssl.session
+        val chain = rec.chain.ifEmpty { s.peerCertificates.filterIsInstance<X509Certificate>() }
+        return ssl to TlsReport(host, port, s.protocol, s.cipherSuite, chain, trustCheck(chain), chain.isNotEmpty() && HostMatch.matches(host, chain[0]), (System.nanoTime() - t0) / 1_000_000)
+    }
+
     /** 이 기기가 지원하는 TLS 버전 목록 */
     fun supportedProtocols(): List<String> = SSLContext.getInstance("TLS").apply { init(null, null, null) }.supportedSSLParameters.protocols.toList()
 }
@@ -174,7 +186,7 @@ object MiniHttp {
 
     fun request(
         url: String, method: String = "GET", headers: Map<String, String> = emptyMap(), maxBody: Int = 0, timeoutMs: Int = 8000, insecure: Boolean = false,
-        userAgent: String = "SelfCheck-NetTools/1.0", newSocket: () -> Socket = { Socket() },
+        userAgent: String = "SelfCheck-NetTools/1.0", newSocket: () -> Socket = { Socket() }, body: ByteArray? = null,
     ): HttpResult {
         val u = parseUrl(url) ?: throw IOException("URL 형식이 올바르지 않아요")
         val t0 = System.nanoTime(); fun ms(from: Long = t0) = (System.nanoTime() - from) / 1_000_000
@@ -207,10 +219,16 @@ object MiniHttp {
                 }
             }
             val req = StringBuilder("$method ${u.path} HTTP/1.1\r\nHost: ${if (':' in u.host) "[${u.host}]" else u.host}${if (u.port == (if (u.isHttps) 443 else 80)) "" else ":${u.port}"}\r\n")
-            req.append("User-Agent: $userAgent\r\nAccept: */*\r\nAccept-Encoding: identity\r\nConnection: close\r\n")
+            // 기본 머리글은 호출한 쪽이 같은 이름으로 정하면 그 값으로 바꿈 (예: Accept-Encoding: gzip)
+            fun given(n: String) = headers.keys.any { it.equals(n, true) }
+            if (!given("User-Agent")) req.append("User-Agent: $userAgent\r\n")
+            if (!given("Accept")) req.append("Accept: */*\r\n")
+            if (!given("Accept-Encoding")) req.append("Accept-Encoding: identity\r\n")
+            req.append("Connection: close\r\n")
             for ((k, v) in headers) req.append("$k: $v\r\n")
+            if (body != null && headers.keys.none { it.equals("Content-Length", true) }) req.append("Content-Length: ${body.size}\r\n")
             req.append("\r\n")
-            sock.getOutputStream().apply { write(req.toString().toByteArray(Charsets.ISO_8859_1)); flush() }
+            sock.getOutputStream().apply { write(req.toString().toByteArray(Charsets.ISO_8859_1)); if (body != null) write(body); flush() }
             val ins = BufferedInputStream(sock.getInputStream())
             val tr = System.nanoTime()
             val first = readLine(ins) ?: throw IOException("서버가 아무 응답 없이 연결을 닫았어요")
@@ -218,7 +236,7 @@ object MiniHttp {
             val status = Regex("""^HTTP/\d(?:\.\d)?\s+(\d{3})""").find(first)?.groupValues?.get(1)?.toInt() ?: throw IOException("HTTP 응답이 아니에요: ${first.take(60)}")
             val hs = ArrayList<Pair<String, String>>()
             while (true) { val l = readLine(ins) ?: break; if (l.isEmpty()) break; parseHeaderLine(l)?.let { hs += it } }
-            var body: String? = null
+            var respBody: String? = null
             val noBody = method == "HEAD" || status in 100..199 || status == 204 || status == 304
             if (maxBody > 0 && !noBody) {
                 val te = hs.firstOrNull { it.first.equals("Transfer-Encoding", true) }?.second ?: ""
@@ -231,9 +249,9 @@ object MiniHttp {
                         bo.toByteArray()
                     }
                 } catch (_: SocketTimeoutException) { ByteArray(0) }
-                body = strictUtf8(bytes) ?: String(bytes, Charsets.ISO_8859_1)
+                respBody = strictUtf8(bytes) ?: String(bytes, Charsets.ISO_8859_1)
             }
-            return HttpResult(u.toString(), status, first, hs, body, IpUtil.format(addr), HttpTimings(dnsMs, connectMs, tlsMs, ttfb, ms()), tls)
+            return HttpResult(u.toString(), status, first, hs, respBody, IpUtil.format(addr), HttpTimings(dnsMs, connectMs, tlsMs, ttfb, ms()), tls)
         } finally { runCatching { sock.close() } }
     }
 

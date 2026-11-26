@@ -349,4 +349,5 @@ class NetToolActivity : ColumnActivity(), ToolHost {
     override fun wifiDetails(): List<Pair<String, String>>? = LocalNet.wifi(this)
     override fun lanSockets(): () -> Socket = LocalNet.socketFactory(LocalNet.lan(netRows))
     override fun bindDatagram(s: java.net.DatagramSocket) { LocalNet.lan(netRows)?.network?.let { runCatching { it.bindSocket(s) } } }
+    override fun geoDb(): IpGeoDb? = runCatching { IpGeoDb.shared { assets.open(it) } }.getOrNull()
 }
