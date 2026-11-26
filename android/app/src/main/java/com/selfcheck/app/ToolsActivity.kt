@@ -39,6 +39,7 @@ class ToolsActivity : ColumnActivity() {
         entries += Entry("문서·글자·색", "번호판 조회", "번호판 글자로 차량 종류·용도 풀이 + 공식 조회 서비스 연결 (소유자 조회 없음)") { Intent(this, PlateLookupActivity::class.java) }
         for (t in LiveTools.ALL) entries += Entry("실시간 카메라", t.title, t.desc) { Intent(this, LiveToolActivity::class.java).putExtra("tool", t.id) }
         for ((id, title, desc) in UtilityActivity.TOOLS) if (id != "privacy") entries += Entry("보안·생활", title, desc) { Intent(this, UtilityActivity::class.java).putExtra("tool", id) }
+        for ((id, title, desc) in NetworkActivity.TOOLS) entries += Entry("네트워크", title, desc) { Intent(this, NetworkActivity::class.java).putExtra("tool", id) }
         for ((id, title, desc) in SensorActivity.TOOLS) entries += Entry("센서", title, desc) { Intent(this, SensorActivity::class.java).putExtra("tool", id) }
 
         setupColumn("도구 모음", "도구 ${entries.size}가지 · 사진·얼굴 분석은 모두 휴대폰 안에서 처리해요")
@@ -71,7 +72,7 @@ class ToolsActivity : ColumnActivity() {
 
     private fun iconOf(group: String) = mapOf(
         "정밀 얼굴 분석" to "🧖", "음성" to "🎙️", "얼굴 보정" to "💄", "인물·증명사진" to "🆔", "개인정보 보호" to "🛡️", "사진 편집" to "🖼️",
-        "필터·효과" to "🎨", "문서·글자·색" to "📄", "실시간 카메라" to "📷", "보안·생활" to "🔐", "센서" to "📡",
+        "필터·효과" to "🎨", "문서·글자·색" to "📄", "실시간 카메라" to "📷", "보안·생활" to "🔐", "네트워크" to "🌐", "센서" to "📡",
     )[group] ?: "🧰"
 
     private fun show(q: String) {

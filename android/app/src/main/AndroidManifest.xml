@@ -3,6 +3,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 네트워크 도구: 연결된 Wi-Fi 의 내 IP·공유기 주소를 읽기 (묻는 창 없이 허용되는 권한) -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -45,6 +47,7 @@
         <activity android:name=".LiveToolActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".UtilityActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".SensorActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".NetworkActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
