@@ -26,7 +26,7 @@ object SecTools {
     private fun fileText(host: ToolHost, key: String, max: Int = 5_000_000): String? {
         val f = host.file(key) ?: return null
         val ins = f.open() ?: return null
-        return ins.use { s -> val b = s.readNBytes(max); strictUtf8(b) ?: String(b, Charsets.ISO_8859_1) }
+        return ins.use { s -> val b = s.readUpTo(max); strictUtf8(b) ?: String(b, Charsets.ISO_8859_1) }
     }
 
     val ALL: List<NetTool> = listOf(
@@ -225,7 +225,7 @@ object SecTools {
         tool("sec_entropy", S, "무작위 정도(엔트로피) 측정", "글이나 파일이 얼마나 무작위처럼 보이는지 — 암호화·압축된 데이터와 평범한 글을 구분하고, 키·토큰이 충분히 무작위인지 확인",
             listOf(multi("t", "글", "", ""), file("f", "또는 파일 (선택)")), ToolMode.OFFLINE, NOTE_LOCAL, live = true, runLabel = "측정") { i, host, _ ->
             val f = host.file("f")
-            val data: ByteArray = if (f != null) (f.open()?.use { it.readNBytes(8_000_000) } ?: return@tool fail("파일을 열 수 없어요")) else i.raw("t").toByteArray(Charsets.UTF_8)
+            val data: ByteArray = if (f != null) (f.open()?.use { it.readUpTo(8_000_000) } ?: return@tool fail("파일을 열 수 없어요")) else i.raw("t").toByteArray(Charsets.UTF_8)
             if (data.isEmpty()) return@tool need("글을 입력하거나 파일을 고르세요")
             val counts = IntArray(256); for (b in data) counts[b.toInt() and 0xff]++
             val h = counts.filter { it > 0 }.sumOf { c -> val p = c.toDouble() / data.size; p * kotlin.math.log2(1.0 / p) }

@@ -266,7 +266,7 @@ object X25519 {
 object Ed25519 {
     private val P = BigInteger.ONE.shiftLeft(255).subtract(BigInteger.valueOf(19))
     private val D = BigInteger.valueOf(-121665).multiply(BigInteger.valueOf(121666).modInverse(P)).mod(P)
-    private val SQRT_M1 = BigInteger.TWO.modPow(P.subtract(BigInteger.ONE).shiftRight(2), P)
+    private val SQRT_M1 = BigInteger.valueOf(2).modPow(P.subtract(BigInteger.ONE).shiftRight(2), P)
     private class Pt(val x: BigInteger, val y: BigInteger, val z: BigInteger, val t: BigInteger)
 
     private fun recoverX(y: BigInteger, sign: Int): BigInteger? {
@@ -286,7 +286,7 @@ object Ed25519 {
 
     private fun add(p: Pt, q: Pt): Pt {
         val a = p.y.subtract(p.x).multiply(q.y.subtract(q.x)).mod(P); val b = p.y.add(p.x).multiply(q.y.add(q.x)).mod(P)
-        val c = BigInteger.TWO.multiply(p.t).multiply(q.t).multiply(D).mod(P); val d = BigInteger.TWO.multiply(p.z).multiply(q.z).mod(P)
+        val c = BigInteger.valueOf(2).multiply(p.t).multiply(q.t).multiply(D).mod(P); val d = BigInteger.valueOf(2).multiply(p.z).multiply(q.z).mod(P)
         val e = b.subtract(a); val f = d.subtract(c); val g = d.add(c); val h = b.add(a)
         return Pt(e.multiply(f).mod(P), g.multiply(h).mod(P), f.multiply(g).mod(P), e.multiply(h).mod(P))
     }

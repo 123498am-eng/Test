@@ -1,0 +1,201 @@
+Oct 10 08:00:02 web1 kernel[3598]: Out of memory: Killed process 6 (java)
+Oct 10 08:00:15 web1 CRON[1166]: (root) CMD (run-parts /etc/cron.hourly) #8
+Oct 10 08:00:27 web1 CRON[3974]: (root) CMD (run-parts /etc/cron.hourly) #31
+Oct 10 08:00:46 web1 systemd[7134]: Reloading.
+Oct 10 08:00:47 web1 sshd[2375]: error: maximum authentication attempts exceeded for root from 203.0.113.2 port 4000
+Oct 10 08:00:57 web1 systemd[8910]: Started Daily apt download activities.
+Oct 10 08:01:07 web1 nginx[3946]: open() "/var/www/x" failed (2: No such file or directory)
+Oct 10 08:01:16 web1 CRON[7632]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:01:32 web1 nginx[7230]: worker process 95 exited on signal 11
+Oct 10 08:01:37 web1 kernel[943]: Out of memory: Killed process 25 (java)
+Oct 10 08:01:44 web1 sshd[638]: Accepted publickey for ubuntu from 192.0.2.49 port 40022
+Oct 10 08:01:48 web1 systemd[938]: Reloading.
+Oct 10 08:01:56 web1 systemd[5952]: Started Daily apt download activities.
+Oct 10 08:02:02 web1 sshd[2649]: Server listening on 0.0.0.0 port 16.
+Oct 10 08:02:13 web1 systemd[2823]: Started Session 48 of user ubuntu.
+Oct 10 08:02:31 web1 systemd[8186]: Started Session 60 of user ubuntu.
+Oct 10 08:02:43 web1 kernel[4870]: EXT4-fs error (device sda1): ext4_find_entry: reading directory
+Oct 10 08:02:45 web1 sshd[2303]: Server listening on 0.0.0.0 port 30.
+Oct 10 08:03:00 web1 CRON[9361]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:03:14 web1 kernel[9632]: Out of memory: Killed process 69 (java)
+Oct 10 08:03:19 web1 kernel[9876]: eth0: link up
+Oct 10 08:03:27 web1 CRON[371]: (root) CMD (run-parts /etc/cron.hourly) #65
+Oct 10 08:03:38 web1 kernel[8222]: eth0: link up
+Oct 10 08:03:53 web1 systemd[4773]: Reloading.
+Oct 10 08:03:55 web1 systemd[9705]: Started Session 26 of user ubuntu.
+Oct 10 08:04:12 web1 systemd[7974]: Started Session 99 of user ubuntu.
+Oct 10 08:04:23 web1 kernel[5855]: Out of memory: Killed process 71 (java)
+Oct 10 08:04:40 web1 systemd[8259]: Started Daily apt download activities.
+Oct 10 08:04:43 web1 sshd[571]: error: maximum authentication attempts exceeded for root from 203.0.113.86 port 4000
+Oct 10 08:04:53 web1 kernel[9569]: usb 1-1: new high-speed USB device number 87
+Oct 10 08:05:12 web1 CRON[618]: (root) CMD (run-parts /etc/cron.hourly) #19
+Oct 10 08:05:25 web1 CRON[9923]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:05:43 web1 CRON[1643]: (root) CMD (run-parts /etc/cron.hourly) #99
+Oct 10 08:06:01 web1 systemd[3562]: Started Session 98 of user ubuntu.
+Oct 10 08:06:05 web1 CRON[7715]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:06:23 web1 systemd[2004]: Started Session 94 of user ubuntu.
+Oct 10 08:06:28 web1 systemd[8848]: Started Daily apt download activities.
+Oct 10 08:06:29 web1 kernel[3049]: Out of memory: Killed process 6 (java)
+Oct 10 08:06:36 web1 systemd[3594]: Reloading.
+Oct 10 08:06:42 web1 systemd[6111]: Reloading.
+Oct 10 08:06:43 web1 CRON[4941]: (root) CMD (run-parts /etc/cron.hourly) #47
+Oct 10 08:06:45 web1 kernel[8359]: Out of memory: Killed process 93 (java)
+Oct 10 08:06:48 web1 systemd[6189]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:06:58 web1 kernel[6459]: Out of memory: Killed process 23 (java)
+Oct 10 08:07:04 web1 CRON[236]: (root) CMD (run-parts /etc/cron.hourly) #83
+Oct 10 08:07:16 web1 systemd[1292]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:07:20 web1 sshd[8923]: error: maximum authentication attempts exceeded for root from 203.0.113.47 port 4000
+Oct 10 08:07:28 web1 kernel[6363]: EXT4-fs error (device sda1): ext4_find_entry: reading directory
+Oct 10 08:07:47 web1 systemd[5460]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:07:52 web1 systemd[357]: Started Daily apt download activities.
+-- Logs begin at Tue 2023-10-10 --
+Oct 10 08:07:54 web1 CRON[1377]: (root) CMD (run-parts /etc/cron.hourly) #82
+Oct 10 08:07:55 web1 CRON[6066]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:08:15 web1 systemd[8983]: Reloading.
+Oct 10 08:08:26 web1 sshd[6200]: Accepted publickey for ubuntu from 192.0.2.9 port 40022
+Oct 10 08:08:29 web1 CRON[4514]: (root) CMD (run-parts /etc/cron.hourly) #56
+Oct 10 08:08:41 web1 CRON[800]: (root) CMD (run-parts /etc/cron.hourly) #36
+Oct 10 08:08:44 web1 CRON[9959]: (root) CMD (run-parts /etc/cron.hourly) #98
+Oct 10 08:08:49 web1 systemd[1680]: Reloading.
+Oct 10 08:09:02 web1 kernel[7697]: EXT4-fs error (device sda1): ext4_find_entry: reading directory
+Oct 10 08:09:20 web1 nginx[4051]: client sent invalid request while reading client request line
+Oct 10 08:09:32 web1 CRON[916]: (root) CMD (run-parts /etc/cron.hourly) #2
+Oct 10 08:09:42 web1 sshd[6219]: Accepted publickey for ubuntu from 192.0.2.79 port 40022
+Oct 10 08:09:46 web1 sshd[3052]: Server listening on 0.0.0.0 port 23.
+Oct 10 08:10:00 web1 nginx[3772]: client sent invalid request while reading client request line
+Oct 10 08:10:02 web1 systemd[6301]: Reloading.
+Oct 10 08:10:08 web1 systemd[9774]: Reloading.
+Oct 10 08:10:11 web1 CRON[9862]: (root) CMD (run-parts /etc/cron.hourly) #69
+Oct 10 08:10:15 web1 CRON[7968]: (root) CMD (run-parts /etc/cron.hourly) #72
+Oct 10 08:10:33 web1 systemd[3537]: Started Session 26 of user ubuntu.
+Oct 10 08:10:47 web1 systemd[8637]: Started Daily apt download activities.
+Oct 10 08:11:05 web1 systemd[227]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:11:09 web1 CRON[1070]: (root) CMD (run-parts /etc/cron.hourly) #85
+Oct 10 08:11:26 web1 systemd[9975]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:11:38 web1 sshd[8638]: Accepted publickey for ubuntu from 192.0.2.95 port 40022
+Oct 10 08:11:54 web1 sshd[6454]: Accepted publickey for ubuntu from 192.0.2.40 port 40022
+Oct 10 08:12:02 web1 CRON[7641]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:12:18 web1 systemd[2648]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:12:37 web1 kernel[5173]: eth0: link up
+Oct 10 08:12:51 web1 CRON[8551]: (root) CMD (run-parts /etc/cron.hourly) #67
+Oct 10 08:12:52 web1 CRON[3281]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:12:57 web1 CRON[8462]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:13:00 web1 kernel[5081]: Out of memory: Killed process 1 (java)
+Oct 10 08:13:16 web1 systemd[8859]: Started Session 33 of user ubuntu.
+Oct 10 08:13:27 web1 kernel[4170]: usb 1-1: new high-speed USB device number 43
+Oct 10 08:13:33 web1 sshd[8397]: Server listening on 0.0.0.0 port 35.
+Oct 10 08:13:39 web1 nginx[1043]: open() "/var/www/x" failed (2: No such file or directory)
+Oct 10 08:13:46 web1 CRON[8329]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:13:55 web1 kernel[6565]: EXT4-fs error (device sda1): ext4_find_entry: reading directory
+Oct 10 08:13:57 web1 kernel[3976]: Out of memory: Killed process 36 (java)
+Oct 10 08:14:10 web1 kernel[9937]: eth0: link up
+Oct 10 08:14:21 web1 kernel[7788]: eth0: link up
+Oct 10 08:14:38 web1 kernel[5247]: EXT4-fs error (device sda1): ext4_find_entry: reading directory
+Oct 10 08:14:48 web1 nginx[5236]: client sent invalid request while reading client request line
+Oct 10 08:15:06 web1 CRON[3368]: (root) CMD (run-parts /etc/cron.hourly) #71
+Oct 10 08:15:17 web1 systemd[6481]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:15:28 web1 nginx[7094]: client sent invalid request while reading client request line
+Oct 10 08:15:38 web1 kernel[1094]: Out of memory: Killed process 9 (java)
+Oct 10 08:15:43 web1 systemd[9967]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:15:55 web1 CRON[2397]: (root) CMD (run-parts /etc/cron.hourly) #8
+Oct 10 08:16:03 web1 kernel[4374]: eth0: link up
+Oct 10 08:16:06 web1 CRON[2229]: (root) CMD (run-parts /etc/cron.hourly) #32
+Oct 10 08:16:18 web1 systemd[6063]: Started Session 48 of user ubuntu.
+Oct 10 08:16:28 web1 nginx[1607]: open() "/var/www/x" failed (2: No such file or directory)
+Oct 10 08:16:30 web1 kernel[8655]: usb 1-1: new high-speed USB device number 5
+Oct 10 08:16:31 web1 sshd[9774]: Accepted publickey for ubuntu from 192.0.2.1 port 40022
+Oct 10 08:16:37 web1 CRON[2807]: (root) CMD (run-parts /etc/cron.hourly) #14
+Oct 10 08:16:57 web1 nginx[1012]: client sent invalid request while reading client request line
+Oct 10 08:17:16 web1 sshd[4599]: error: maximum authentication attempts exceeded for root from 203.0.113.13 port 4000
+Oct 10 08:17:21 web1 systemd[4941]: Reloading.
+Oct 10 08:17:40 web1 systemd[2478]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:17:43 web1 nginx[6829]: open() "/var/www/x" failed (2: No such file or directory)
+Oct 10 08:18:01 web1 systemd[548]: Started Session 49 of user ubuntu.
+Oct 10 08:18:06 web1 CRON[9127]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:18:10 web1 sshd[2565]: Accepted publickey for ubuntu from 192.0.2.35 port 40022
+Oct 10 08:18:25 web1 kernel[2498]: usb 1-1: new high-speed USB device number 85
+Oct 10 08:18:44 web1 sshd[1632]: Server listening on 0.0.0.0 port 63.
+Oct 10 08:18:51 web1 nginx[9797]: client sent invalid request while reading client request line
+Oct 10 08:18:57 web1 CRON[6477]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:19:09 web1 systemd[4155]: Started Daily apt download activities.
+Oct 10 08:19:28 web1 CRON[2654]: (root) CMD (run-parts /etc/cron.hourly) #46
+Oct 10 08:19:48 web1 sshd[4838]: error: maximum authentication attempts exceeded for root from 203.0.113.81 port 4000
+Oct 10 08:20:03 web1 systemd[9051]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:20:14 web1 sshd[202]: error: maximum authentication attempts exceeded for root from 203.0.113.30 port 4000
+Oct 10 08:20:30 web1 systemd[3869]: Started Session 22 of user ubuntu.
+Oct 10 08:20:35 web1 nginx[1689]: worker process 2 exited on signal 11
+Oct 10 08:20:39 web1 kernel[4618]: EXT4-fs error (device sda1): ext4_find_entry: reading directory
+Oct 10 08:20:58 web1 kernel[8723]: eth0: link up
+Oct 10 08:21:10 web1 kernel[5534]: Out of memory: Killed process 3 (java)
+Oct 10 08:21:21 web1 kernel[8151]: EXT4-fs error (device sda1): ext4_find_entry: reading directory
+Oct 10 08:21:32 web1 systemd[6544]: Started Session 84 of user ubuntu.
+Oct 10 08:21:39 web1 systemd[348]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:21:57 web1 sshd[5643]: Server listening on 0.0.0.0 port 32.
+Oct 10 08:22:05 web1 sshd[4542]: error: maximum authentication attempts exceeded for root from 203.0.113.45 port 4000
+Oct 10 08:22:08 web1 CRON[8209]: (root) CMD (run-parts /etc/cron.hourly) #94
+Oct 10 08:22:23 web1 systemd[6655]: Reloading.
+Oct 10 08:22:34 web1 systemd[4751]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:22:52 web1 systemd[6299]: Reloading.
+Oct 10 08:23:04 web1 sshd[9674]: Accepted publickey for ubuntu from 192.0.2.85 port 40022
+Oct 10 08:23:20 web1 CRON[2092]: (root) CMD (run-parts /etc/cron.hourly) #59
+Oct 10 08:23:35 web1 CRON[8559]: (root) CMD (run-parts /etc/cron.hourly) #91
+Oct 10 08:23:36 web1 kernel[3120]: Out of memory: Killed process 79 (java)
+Oct 10 08:23:37 web1 kernel[8662]: usb 1-1: new high-speed USB device number 57
+Oct 10 08:23:48 web1 CRON[7441]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:23:52 web1 sshd[7989]: error: maximum authentication attempts exceeded for root from 203.0.113.72 port 4000
+Oct 10 08:23:54 web1 CRON[681]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:24:06 web1 nginx[1363]: open() "/var/www/x" failed (2: No such file or directory)
+Oct 10 08:24:15 web1 kernel[8184]: eth0: link up
+Oct 10 08:24:33 web1 sshd[3589]: Server listening on 0.0.0.0 port 18.
+Oct 10 08:24:50 web1 CRON[5434]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:25:00 web1 nginx[9566]: open() "/var/www/x" failed (2: No such file or directory)
+Oct 10 08:25:19 web1 systemd[2587]: Started Session 20 of user ubuntu.
+Oct 10 08:25:38 web1 kernel[2272]: EXT4-fs error (device sda1): ext4_find_entry: reading directory
+Oct 10 08:25:47 web1 systemd[4192]: Started Daily apt download activities.
+Oct 10 08:26:00 web1 systemd[6338]: Started Daily apt download activities.
+Oct 10 08:26:18 web1 kernel[471]: EXT4-fs error (device sda1): ext4_find_entry: reading directory
+Oct 10 08:26:35 web1 CRON[6784]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:26:38 web1 systemd[6064]: Reloading.
+Oct 10 08:26:45 web1 sshd[8290]: error: maximum authentication attempts exceeded for root from 203.0.113.49 port 4000
+Oct 10 08:26:47 web1 systemd[7352]: Started Daily apt download activities.
+Oct 10 08:27:00 web1 systemd[2268]: Started Session 50 of user ubuntu.
+Oct 10 08:27:08 web1 CRON[4527]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:27:25 web1 systemd[5754]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:27:41 web1 systemd[3550]: Started Daily apt download activities.
+Oct 10 08:27:47 web1 nginx[7512]: client sent invalid request while reading client request line
+Oct 10 08:27:51 web1 kernel[9944]: EXT4-fs error (device sda1): ext4_find_entry: reading directory
+Oct 10 08:28:04 web1 CRON[3461]: (root) CMD (run-parts /etc/cron.hourly) #63
+Oct 10 08:28:20 web1 sshd[571]: error: maximum authentication attempts exceeded for root from 203.0.113.16 port 4000
+Oct 10 08:28:35 web1 sshd[257]: Server listening on 0.0.0.0 port 97.
+Oct 10 08:28:38 web1 CRON[9417]: (root) CMD (run-parts /etc/cron.hourly) #79
+Oct 10 08:28:42 web1 kernel[8257]: Out of memory: Killed process 47 (java)
+Oct 10 08:28:57 web1 kernel[5362]: eth0: link up
+Oct 10 08:29:01 web1 systemd[6261]: Reloading.
+Oct 10 08:29:03 web1 nginx[6856]: open() "/var/www/x" failed (2: No such file or directory)
+Oct 10 08:29:23 web1 systemd[3094]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:29:32 web1 systemd[4998]: Reloading.
+Oct 10 08:29:39 web1 nginx[2215]: open() "/var/www/x" failed (2: No such file or directory)
+Oct 10 08:29:45 web1 systemd[2477]: nginx.service: Failed with result 'exit-code'.
+Oct 10 08:29:48 web1 systemd[923]: Reloading.
+Oct 10 08:30:03 web1 nginx[6465]: worker process 37 exited on signal 11
+Oct 10 08:30:05 web1 sshd[456]: Server listening on 0.0.0.0 port 4.
+Oct 10 08:30:19 web1 CRON[8583]: (root) CMD (run-parts /etc/cron.hourly) #53
+Oct 10 08:30:28 web1 systemd[1022]: Started Daily apt download activities.
+Oct 10 08:30:33 web1 kernel[8988]: eth0: link up
+Oct 10 08:30:52 web1 kernel[7227]: EXT4-fs error (device sda1): ext4_find_entry: reading directory
+Oct 10 08:30:55 web1 CRON[8844]: (root) CMD (run-parts /etc/cron.hourly) #5
+Oct 10 08:31:11 web1 CRON[5948]: (root) CMD (run-parts /etc/cron.hourly) #61
+Oct 10 08:31:16 web1 CRON[3348]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:31:17 web1 nginx[9965]: client sent invalid request while reading client request line
+Oct 10 08:31:21 web1 sshd[6606]: error: maximum authentication attempts exceeded for root from 203.0.113.35 port 4000
+Oct 10 08:31:35 web1 sshd[6614]: Server listening on 0.0.0.0 port 8.
+Oct 10 08:31:55 web1 systemd[2276]: Started Session 18 of user ubuntu.
+Oct 10 08:32:09 web1 CRON[7118]: (root) CMD (run-parts /etc/cron.hourly) #56
+Oct 10 08:32:19 web1 sshd[9159]: Server listening on 0.0.0.0 port 37.
+Oct 10 08:32:24 web1 CRON[1938]: (root) CMD (run-parts /etc/cron.hourly) #5
+Oct 10 08:32:30 web1 CRON[7941]: (root) CMD (run-parts /etc/cron.hourly) #9
+Oct 10 08:32:44 web1 systemd[5981]: Started Session 35 of user ubuntu.
+Oct 10 08:32:51 web1 systemd[2926]: Reloading.
+Oct 10 08:33:01 web1 CRON[3259]: (www-data) CMD (php /var/www/cron.php)
+Oct 10 08:33:07 web1 kernel[8978]: eth0: link up
+Oct 10 08:33:09 web1 nginx[8346]: open() "/var/www/x" failed (2: No such file or directory)

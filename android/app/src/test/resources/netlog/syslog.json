@@ -1,0 +1,13 @@
+{
+ "total": 200,
+ "progs": {
+  "kernel": 40,
+  "CRON": 50,
+  "systemd": 60,
+  "sshd": 30,
+  "nginx": 20
+ },
+ "sev": {
+  "\uc624\ub958": 59
+ }
+}
