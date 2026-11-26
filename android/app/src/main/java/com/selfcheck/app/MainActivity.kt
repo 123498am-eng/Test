@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity() {
             Feature("🧖", "정밀 얼굴 스캔", "주름·피부·대칭 분석", 0xFFFFE4EC.toInt()) { go(FaceScanActivity::class.java) },
             Feature("🆚", "얼굴 비교", "닮은 정도를 %로", 0xFFE0F2FE.toInt()) { go(FaceCompareActivity::class.java) },
             Feature("🎙️", "음성 변조", "소녀·뉴스 앵커 등 ${VoicePresets.ALL.size}가지", 0xFFEDE9FE.toInt()) { go(VoiceChangerActivity::class.java) },
-            Feature("🧰", "도구 모음", "사진·카메라·보안 70여 가지", 0xFFFEF3C7.toInt()) { go(ToolsActivity::class.java) },
+            Feature("🧰", "도구 모음", "사진·카메라·보안·네트워크 ${ToolsActivity.countLabel(this)}", 0xFFFEF3C7.toInt()) { go(ToolsActivity::class.java) },
             Feature("🔌", "포트 검사", "IP로 열린 포트 점검", 0xFFCFFAFE.toInt(), true) { startActivity(Intent(this, NetworkActivity::class.java).putExtra("tool", "port_scan")) },
             Feature("🌐", "IP 찾기", "내 IP·Wi-Fi 기기·도메인", 0xFFFEF9C3.toInt(), true) { startActivity(Intent(this, NetworkActivity::class.java).putExtra("tool", "my_ip")) },
             Feature("🚗", "번호판 인식", "카메라로 읽어 목록 저장", 0xFFDCFCE7.toInt()) { go(PlateActivity::class.java) },
@@ -141,7 +141,7 @@ class MainActivity : ComponentActivity() {
             background = UiKit.rounded(this@MainActivity, 0x33FFFFFF, 20f)
         }
         chips.addView(pill("🔒 분석은 폰 안에서만"))
-        chips.addView(pill("🧰 도구 70여 가지"), LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(8) })
+        chips.addView(pill("🧰 도구 ${ToolsActivity.countLabel(this)}"), LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(8) })
         hero.addView(chips)
         return hero
     }

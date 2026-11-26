@@ -153,4 +153,76 @@ class UiShotTest {
     }
     @Test fun netIpInfo() = screen<NetworkActivity>("${tag}_net_ipinfo", 1300, mapOf("tool" to "ip_info")) { a -> a.showIpInfo("192.168.0.77/24") }
     @Test fun netIpInfoAddr() = screen<NetworkActivity>("${tag}_net_ipinfo_addr", 1300, mapOf("tool" to "ip_info")) { a -> a.showIpInfo("100.64.1.5") }
+
+    // ---- 네트워크 도구 170여 가지의 공통 실행 화면 (오프라인 도구는 진짜로 실행, 인터넷 도구는 꾸민 결과를 그려서 모양만 확인)
+    @Test fun ntSubnet() = screen<NetToolActivity>("${tag}_nt_subnet", 1900, mapOf("tool" to "subnet_calc"))
+    @Test fun ntCidrMerge() = screen<NetToolActivity>("${tag}_nt_cidr_merge", 1500, mapOf("tool" to "cidr_merge"))
+    @Test fun ntRefPorts() = screen<NetToolActivity>("${tag}_nt_ref_ports", 1500, mapOf("tool" to "ref_ports"))
+    @Test fun ntFirewall() = screen<NetToolActivity>("${tag}_nt_firewall", 1700, mapOf("tool" to "fw_iptables"))
+    @Test fun ntJwt() = screen<NetToolActivity>("${tag}_nt_jwt", 1500, mapOf("tool" to "jwt_decode"))
+    @Test fun ntPingStats() = screen<NetToolActivity>("${tag}_nt_ping_stats", 1500, mapOf("tool" to "ping_stats"))
+    /** 인터넷 도구를 연 첫 모습: 안내(무엇을 보내는지), 입력 칸, 실행 버튼 */
+    @Test fun ntOnlineIdle() = screen<NetToolActivity>("${tag}_nt_online_idle", 1100, mapOf("tool" to "dns_mail"))
+    @Test fun ntPortCheckIdle() = screen<NetToolActivity>("${tag}_nt_portcheck_idle", 1200, mapOf("tool" to "port_check"))
+
+    @Test fun ntDiagResult() = screen<NetToolActivity>("${tag}_nt_diag_result", 1700, mapOf("tool" to "internet_check")) { a ->
+        a.render(result {
+            header("단계", "결과", "내용")
+            row("1. 네트워크 연결", "정상", "Wi-Fi · 안드로이드의 인터넷 확인: 예", level = -1)
+            row("2. 공유기(192.168.0.1) 응답", "정상", "공유기가 응답해요", level = -1)
+            row("3. 내 DNS 로 도메인 찾기", "문제", "도메인을 찾지 못했어요 (DNS 설정 문제일 수 있어요)", level = 2)
+            row("4. 구글 DNS(8.8.8.8) 직접 질문", "정상", "인터넷의 DNS 에 닿아요", level = -1)
+            row("5. 인터넷 서버(1.1.1.1:443) 연결", "정상", "IP 로는 인터넷에 나가요", level = -1)
+            row("6. HTTPS 웹 접속", "정상", "웹 접속이 돼요", level = -1)
+            row("7. 로그인 화면(캡티브 포털)", "정상", "없어요", level = -1)
+            head("진단")
+            note("DNS 문제로 보여요. DNS 를 8.8.8.8 이나 1.1.1.1 로 바꿔 보세요 (설정 → Private DNS).", 2)
+        })
+    }
+
+    @Test fun ntTlsResult() = screen<NetToolActivity>("${tag}_nt_tls_result", 2100, mapOf("tool" to "tls_cert")) { a ->
+        a.render(result {
+            kv("접속", "example.com:443  (96ms)"); kv("TLS 버전", "TLSv1.3", -1); kv("암호 스위트", "TLS_AES_256_GCM_SHA384")
+            kv("신뢰 여부", "믿을 수 있어요", -1); kv("이름 일치", "접속한 주소와 일치", -1)
+            head("서버 인증서")
+            kv("주체(Subject)", "CN=example.com, O=Example Org, L=Los Angeles, C=US"); kv("발급자(Issuer)", "CN=DigiCert Global G2 TLS RSA SHA256 2020 CA1, O=DigiCert Inc, C=US")
+            kv("유효 끝", "2027-01-15 23:59 UTC"); kv("남은 기간", "21일 남음", 1); kv("서명 알고리즘", "SHA256withRSA"); kv("공개키", "RSA 2048비트")
+            kv("SHA-256 지문", "5A:3B:CC:19:0F:64:A2:7D:E1:88:30:4B:92:0C:7E:15:A9:D2:6F:03:B7:4E:1C:8A:55:F0:2D:9B:61:C4:3E:77")
+            kv("대체 이름(SAN)", "example.com, www.example.com, *.example.org")
+            head("인증서 사슬 (3장)"); kv("1", "CN=example.com"); kv("2", "CN=DigiCert Global G2 TLS RSA SHA256 2020 CA1"); kv("3", "CN=DigiCert Global Root G2")
+        })
+    }
+
+    @Test fun ntTraceResult() = screen<NetToolActivity>("${tag}_nt_trace_result", 1500, mapOf("tool" to "traceroute")) { a ->
+        a.render(result {
+            kv("목적지", "www.google.com (142.250.196.196)"); kv("결과", "도착했어요 (9홉)", -1)
+            header("홉", "주소", "시간", "이름")
+            row("1", "192.168.0.1", "2 ms", "iptime")
+            row("2", "10.20.0.1", "6 ms", "")
+            row("3", "*", "응답 없음", "", level = 1)
+            row("4", "112.188.10.9", "9 ms", "")
+            row("5", "112.174.47.25", "11 ms", "")
+            row("9", "142.250.196.196", "12 ms", "lax17s55-in-f4.1e100.net")
+            note("'*' 는 그 장비가 응답하지 않는다는 뜻이에요(정상인 경우가 많아요). 중간 홉의 시간은 기기에서 ping 을 실행한 전체 소요라 대략적인 값이에요.")
+        })
+    }
+
+    @Test fun ntSpeedResult() = screen<NetToolActivity>("${tag}_nt_speed_result", 1200, mapOf("tool" to "speed_test")) { a ->
+        a.render(result {
+            kv("응답 시간", "9.4 ms", -1); kv("내려받기", "412.7 Mbps  (51.6 MB/s)", -1); kv("올리기", "187.3 Mbps", -1); kv("사용한 데이터", "약 238 MB")
+            note("Wi-Fi 와 서버 거리에 따라 달라지는 값이에요. 여러 번 재 보세요. 유선 연결이 가장 정확해요.")
+        })
+    }
+
+    @Test fun ntUpnpResult() = screen<NetToolActivity>("${tag}_nt_upnp_result", 1500, mapOf("tool" to "upnp_find")) { a ->
+        a.render(result {
+            kv("찾은 기기", "4대 (서비스 11개)")
+            header("IP", "이름 · 제조사 · 모델", "서버 정보")
+            row("192.168.0.1", "ipTIME A3004NS-M · ipTIME · A3004NS-M", "Linux/3.10 UPnP/1.1 MiniUPnPd/2.1")
+            row("192.168.0.20", "거실 TV · Samsung Electronics · UN55TU8000", "Linux/4.14 UPnP/1.0")
+            row("192.168.0.31", "Brother HL-L2350DW · Brother · HL-L2350DW", "")
+            row("192.168.0.44", "-", "Roku/9.4")
+            note("공유기의 UPnP 가 켜져 있어요. 편리하지만 기기가 마음대로 포트를 열 수 있어서, 필요 없다면 공유기 설정에서 끄는 것이 안전해요.", 1)
+        })
+    }
 }
