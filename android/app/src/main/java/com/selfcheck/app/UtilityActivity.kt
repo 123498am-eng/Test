@@ -1,5 +1,7 @@
 package com.selfcheck.app
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.Intent
@@ -8,13 +10,19 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
+import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.CheckBox
@@ -23,6 +31,8 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -35,7 +45,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.concurrent.thread
 
-/** 보안·개인정보 도구 (비밀번호·스미싱·링크·개인정보·QR 만들기·앱 권한·기기 보안) */
+/** 보안·개인정보 도구 (비밀번호·스미싱·링크·개인정보·QR 만들기·앱 권한·기기 보안·위치 공유·기기 찾기) */
 class UtilityActivity : ColumnActivity() {
     companion object {
         val TOOLS = listOf(
@@ -48,10 +58,18 @@ class UtilityActivity : ColumnActivity() {
             Triple("qr_make", "QR 코드 만들기", "링크·글·와이파이·연락처 QR 만들기"),
             Triple("app_audit", "앱 권한 점검", "카메라·마이크·위치·문자 권한을 가진 앱, 스토커웨어 의심 조합"),
             Triple("device_check", "기기 보안 점검", "화면 잠금·보안 패치·개발자 옵션·루팅 흔적"),
+            Triple("loc_share", "위치 공유", "지금 내 위치를 지도 링크·QR 로 만들어 보낼 사람·앱을 직접 골라 보내기 (서버 저장 없음, 계속 추적 아님)"),
+            Triple("find_device", "분실 기기 찾기 점검", "잃어버렸을 때 위치를 볼 수 있게 설정돼 있는지 점검 (안드로이드 '기기 찾기')"),
         )
     }
 
     private lateinit var out: LinearLayout
+    private var pendingAfterLocationPermission: (() -> Unit)? = null
+    private val askLocation = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        val got = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true || grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        val next = pendingAfterLocationPermission; pendingAfterLocationPermission = null
+        if (got) next?.invoke() else toast("위치 권한을 허용해야 가져올 수 있어요")
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -62,6 +80,7 @@ class UtilityActivity : ColumnActivity() {
         when (id) {
             "pw_breach" -> pwBreach(); "pw_strength" -> pwStrength(); "pw_make" -> pwMake(); "smishing" -> smishing(); "link" -> link()
             "privacy" -> privacy(); "qr_make" -> qrMake(); "app_audit" -> appAudit(); "device_check" -> deviceCheck()
+            "loc_share" -> locShare(); "find_device" -> findDevice()
         }
         col.addView(out)
     }
@@ -329,5 +348,99 @@ class UtilityActivity : ColumnActivity() {
         val accNames = access.split(':').filter { it.isNotBlank() }.map { it.substringBefore('/') }
         item(if (accNames.isEmpty()) true else null, "접근성 서비스", if (accNames.isEmpty()) "켜진 서비스 없음" else "켜짐: ${accNames.joinToString()} — 모르는 앱이면 끄세요 (화면 내용을 읽을 수 있음)")
         item(null, "Play 프로텍트", "Play 스토어 → 프로필 → Play 프로텍트에서 '앱 검사'가 켜져 있는지 확인하세요")
+    }
+
+    // ---------------- 위치 공유 (가족·연인 동의 기반 — 서버 없이, 누를 때마다 한 번씩)
+    private fun hasLocationPermission() =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    /** 위치 서비스가 켜 둔 제공자(GPS·네트워크) 중 하나에서 첫 위치가 올 때까지 기다리고, timeoutMs 안에 못 받으면 마지막으로 알려진 위치라도 돌려줌 */
+    @SuppressLint("MissingPermission")
+    private fun singleFix(timeoutMs: Long, cb: (Location?) -> Unit) {
+        val lm = getSystemService(LocationManager::class.java)
+        val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
+        if (providers.isEmpty()) { cb(null); return }
+        var done = false
+        val listeners = HashMap<String, LocationListener>()
+        fun finish(loc: Location?) {
+            if (done) return
+            done = true
+            listeners.values.forEach { runCatching { lm.removeUpdates(it) } }
+            cb(loc)
+        }
+        for (p in providers) {
+            val l = LocationListener { loc -> finish(loc) }
+            listeners[p] = l
+            runCatching { lm.requestLocationUpdates(p, 0L, 0f, l, Looper.getMainLooper()) }
+        }
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (!done) finish(providers.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time })
+        }, timeoutMs)
+    }
+
+    private fun locShare() {
+        col.addView(hint("지금 내 위치를 지도 링크로 만들어, 보낼 사람과 보낼 앱(문자·카카오톡 등)을 직접 골라 보내요. 누르기 전까지는 위치가 이 화면을 벗어나지 않고 서버에 저장하지도 않아요. 계속 따라다니며 알려주는 기능이 아니라 '지금 이 순간'을 한 번 보내는 기능이라, 다시 보내려면 또 눌러야 해요."))
+        val status = hint("")
+        col.addView(status)
+        val msgView = TextView(this).apply { textSize = 14f; setTextColor(Color.BLACK); setTextIsSelectable(true); setPadding(0, dp(8), 0, dp(4)) }
+        val iv = ImageView(this).apply { adjustViewBounds = true; visibility = View.GONE }
+        lateinit var shareBtns: LinearLayout
+
+        fun show(loc: Location) {
+            val lat = loc.latitude; val lon = loc.longitude
+            if (!LocationShare.isValidCoord(lat, lon)) { status.text = "위치를 가져오지 못했어요 (신호 없음). 실외로 나가 다시 시도하세요"; return }
+            val acc = if (loc.hasAccuracy()) loc.accuracy else null
+            val now = System.currentTimeMillis()
+            status.text = "✅ 위치를 가져왔어요 — ${LocationShare.accuracyLabel(acc)}"
+            msgView.text = LocationShare.message(lat, lon, acc, now, now)
+            runCatching { iv.setImageBitmap(qrBitmap(LocationShare.googleMapsLink(lat, lon), 700)) }.onSuccess { iv.visibility = View.VISIBLE }
+            shareBtns.visibility = View.VISIBLE
+        }
+
+        fun fetch() {
+            if (!hasLocationPermission()) {
+                pendingAfterLocationPermission = { fetch() }
+                askLocation.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                return
+            }
+            val lm = getSystemService(LocationManager::class.java)
+            val on = runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
+            if (!on) { status.text = "위치 서비스가 꺼져 있어요. 설정에서 켜고 다시 시도하세요"; runCatching { startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }; return }
+            status.text = "위치를 가져오는 중... (실외일수록 빠르고 정확해요)"
+            singleFix(12000) { loc -> if (loc == null) status.text = "위치를 가져오지 못했어요. 실외에서 다시 시도하세요" else show(loc) }
+        }
+
+        col.addView(buttons("지금 위치 가져오기" to { _ -> fetch() }))
+        out.addView(msgView)
+        out.addView(iv, LinearLayout.LayoutParams(dp(220), dp(220)))
+        shareBtns = buttons(
+            "보낼 앱 고르기" to { _ ->
+                val m = msgView.text.toString()
+                if (m.isNotBlank()) startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, m), "위치 보내기"))
+            },
+            "복사" to { _ -> val m = msgView.text.toString(); if (m.isNotBlank()) copy(m, "내 위치") },
+        ).apply { visibility = View.GONE }
+        col.addView(shareBtns)
+        col.addView(hint("QR 코드를 상대가 카메라로 찍으면 메시지를 보내지 않고도 바로 지도 앱이 열려요 (인터넷·문자 기록에 전혀 남지 않는 방법)."))
+    }
+
+    // ---------------- 분실 기기 찾기 점검 (안드로이드 '기기 찾기' 설정 확인·안내 — 새 추적 기능을 만들지 않음)
+    private fun findDevice() {
+        col.addView(hint("이 기기를 잃어버렸을 때 다른 기기·컴퓨터에서 위치를 보고 소리 울리기·잠그기·초기화를 하려면, 안드로이드가 기본 제공하는 '기기 찾기' 기능이 미리 켜져 있어야 해요. 이 화면은 새 추적 기능을 만든 게 아니라, 그 설정이 켜져 있는지 확인하고 켜는 곳으로 안내만 해요."))
+        fun item(ok: Boolean?, title: String, detail: String, open: (() -> Unit)? = null) = out.addView(TextView(this).apply {
+            text = "${when (ok) { true -> "✅"; false -> "⚠"; null -> "ℹ" }} $title\n   $detail"; textSize = 14f
+            setTextColor(when (ok) { true -> levelColor(0); false -> levelColor(2); null -> Color.DKGRAY }); setPadding(0, dp(6), 0, dp(6))
+            if (open != null) { isClickable = true; setOnClickListener { runCatching { open() } } }
+        })
+        val lm = getSystemService(LocationManager::class.java)
+        val locOn = runCatching { lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
+        item(locOn, "위치 서비스", (if (locOn) "켜져 있어요" else "꺼져 있어요 — 꺼진 채로 잃어버리면 위치를 볼 수 없어요") + " · 눌러서 설정 열기") { startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }
+        item(null, "기기 찾기(Find My Device) 켜짐", "설정 → 보안 및 개인정보 보호(또는 구글)에서 '기기 찾기'가 켜져 있는지 확인하세요. 이 값은 앱이 직접 읽을 수 없어 안내만 해요 · 눌러서 보안 설정 열기") { startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS)) }
+        item(null, "구글 계정 로그인", "기기 찾기는 로그인된 구글 계정 기준으로 동작해요 · 눌러서 계정 설정 열기") { startActivity(Intent(Settings.ACTION_SYNC_SETTINGS)) }
+        result("설정을 확인했으면, 다른 기기나 컴퓨터 브라우저로 아래 공식 주소에 들어가 로그인한 뒤 내 기기가 지도에 실제로 나오는지 시험해 보세요.", Color.DKGRAY)
+        out.addView(button("google.com/android/find 열기") { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/android/find"))) } })
+        out.addView(button("삼성 기기: Find My Mobile 열기") { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://findmymobile.samsung.com"))) } })
+        result("가족 기기도 같은 방법으로 각자 기기에서 미리 켜 두면 돼요. 상대가 모르게 몰래 설정해 따라다니는 용도가 아니라, 분실에 대비해 내 기기(또는 동의한 가족 기기)에 미리 켜 두는 기능이에요.", Color.GRAY)
     }
 }

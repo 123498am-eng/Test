@@ -101,6 +101,8 @@ class UiShotTest {
     @Test fun plateLookup() = screen<PlateLookupActivity>("${tag}_platelookup", 900)
     @Test fun photoTool() = screen<PhotoToolActivity>("${tag}_phototool", 900, mapOf("tool" to "skin_smooth"))
     @Test fun utility() = screen<UtilityActivity>("${tag}_utility", 900, mapOf("tool" to "pw_strength"))
+    @Test fun utilityLocShare() = screen<UtilityActivity>("${tag}_utility_loc_share", 1100, mapOf("tool" to "loc_share"))
+    @Test fun utilityFindDevice() = screen<UtilityActivity>("${tag}_utility_find_device", 1500, mapOf("tool" to "find_device"))
     @Test fun sensor() = screen<SensorActivity>("${tag}_sensor", 800, mapOf("tool" to "level"))
 
 

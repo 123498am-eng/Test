@@ -16,6 +16,10 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- 앱 권한 점검: 설치된 앱 목록 보기 (휴대폰 안에서만 확인, 밖으로 보내지 않음) -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+    <!-- 위치 공유: 버튼을 누른 순간에만 위치를 가져옴 (계속 추적하는 백그라운드 권한은 요청하지 않음) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
     <application
         android:name=".SelfCheckApp"
